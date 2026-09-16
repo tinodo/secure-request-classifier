@@ -1,0 +1,257 @@
+name: CI
+
+# Runs on every pull request and on pushes that do not deploy.
+# Builds and tests everything, and asserts the repository's security invariants.
+# No Azure or Power Platform credentials are used, and none exist.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+
+jobs:
+  dotnet:
+    name: .NET build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - run: dotnet restore
+
+      - name: Build with warnings as errors
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: >-
+          dotnet test --configuration Release --no-build
+          --logger "trx;LogFileName=test-results.trx"
+          --logger "console;verbosity=normal"
+          --results-directory ./TestResults
+          --collect:"XPlat Code Coverage"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results
+          path: ./TestResults
+          if-no-files-found: ignore
+
+  bicep:
+    name: Bicep build and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Bicep
+        run: az bicep install && az bicep version
+
+      - name: Build main template
+        run: az bicep build --file infra/main.bicep --outfile /tmp/main.json
+
+      - name: Build every module independently
+        run: |
+          set -euo pipefail
+          for file in infra/modules/*.bicep; do
+            echo "::group::$file"
+            az bicep build --file "$file" --stdout > /dev/null
+            echo "ok"
+            echo "::endgroup::"
+          done
+
+      - name: Build parameter files
+        run: |
+          set -euo pipefail
+          for file in infra/parameters/*.bicepparam; do
+            echo "Building $file"
+            az bicep build-params --file "$file" --outfile /tmp/params.json
+          done
+
+  powerplatform:
+    name: Power Platform solution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: microsoft/powerplatform-actions/actions-install@v1
+
+      - name: Pack the solution
+        shell: pwsh
+        run: ./scripts/Build-Solution.ps1
+
+      - name: Validate the flow definition is well-formed JSON
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem powerplatform/solution/src/Workflows -Filter *.json | ForEach-Object {
+            try {
+              $null = Get-Content $_.FullName -Raw | ConvertFrom-Json
+              Write-Host "[ OK ] $($_.Name)"
+            }
+            catch {
+              Write-Host "[FAIL] $($_.Name): $($_.Exception.Message)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Validate solution XML is well-formed
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem powerplatform/solution/src -Filter *.xml -Recurse | ForEach-Object {
+            try {
+              [xml](Get-Content $_.FullName -Raw) | Out-Null
+              Write-Host "[ OK ] $($_.FullName.Replace($PWD.Path, '.'))"
+            }
+            catch {
+              Write-Host "[FAIL] $($_.Name): $($_.Exception.Message)"
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: power-platform-solution
+          path: powerplatform/out/*.zip
+          if-no-files-found: error
+
+  scripts:
+    name: PowerShell analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Parse every script
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem ./scripts -Filter *.ps1 | ForEach-Object {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "[FAIL] $($_.Name)"
+              $errors | ForEach-Object { Write-Host "       line $($_.Extent.StartLineNumber): $($_.Message)" }
+            }
+            else {
+              Write-Host "[ OK ] $($_.Name)"
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Analyse
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path ./scripts -Recurse -Severity Error, Warning `
+            -ExcludeRule PSAvoidUsingWriteHost, PSUseShouldProcessForStateChangingFunctions, PSUseSingularNouns
+          if ($results) {
+            $results | Format-Table -AutoSize | Out-String | Write-Host
+            if ($results | Where-Object Severity -eq 'Error') { exit 1 }
+          }
+          else {
+            Write-Host 'No PSScriptAnalyzer findings.'
+          }
+
+  consistency:
+    name: Cross-artefact consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Bicep outputs, workflow references, Power Platform environment variables and connection
+      # references, Function App settings and HTTP routes must all agree. A rename in one place
+      # that is not mirrored elsewhere deploys cleanly and then fails silently at runtime.
+      - name: Check that every artefact agrees
+        shell: pwsh
+        run: ./scripts/Test-RepositoryConsistency.ps1
+
+  security-invariants:
+    name: Security invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: No workflow may reference a GitHub secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The demo's central claim is that no Azure or Power Platform credential is stored in
+          # GitHub. GITHUB_TOKEN is issued per-run by GitHub itself and is not a stored
+          # credential, so it is the only permitted reference.
+          if grep -rnoE 'secrets\.[A-Za-z_][A-Za-z0-9_]*' .github/workflows \
+               | grep -v 'secrets\.GITHUB_TOKEN'; then
+            echo "::error::A workflow references a stored GitHub secret. This demo must authenticate only with OIDC / workload identity federation."
+            exit 1
+          fi
+          echo "No stored secrets are referenced by any workflow."
+
+      - name: Bicep must not disable the security posture
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+
+          if grep -rnE '^[[:space:]]*allowSharedKeyAccess[[:space:]]*:[[:space:]]*true' infra/; then
+            echo "::error::Storage shared key access must stay disabled."
+            fail=1
+          fi
+
+          # Match an actual property assignment, not prose in a comment.
+          if grep -rnE '^[[:space:]]*clientSecretSettingName[[:space:]]*:' infra/; then
+            echo "::error::App Service Authentication must not reference a client secret."
+            fail=1
+          fi
+
+          if ! grep -q "publicNetworkAccess = 'Disabled'" infra/parameters/demo.bicepparam; then
+            echo "::error::demo.bicepparam must ship with the Function App public network access disabled."
+            fail=1
+          fi
+
+          if ! grep -q "allowSharedKeyAccess: false" infra/modules/storage.bicep; then
+            echo "::error::storage.bicep must set allowSharedKeyAccess to false."
+            fail=1
+          fi
+
+          exit $fail
+
+      - name: No credential-shaped literals in the repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Deliberately narrow: looks for assignments of plausible secret material, not for
+          # the words "secret" or "password" in prose and parameter names.
+          if grep -rniE '(client_secret|clientsecret|password|pwd|sas_token|sastoken)[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9+/=_~.-]{12,}["'"'"']' \
+               --include='*.cs' --include='*.bicep' --include='*.json' --include='*.yml' \
+               --include='*.yaml' --include='*.ps1' --include='*.bicepparam' . ; then
+            echo "::error::Something that looks like a hard-coded credential was found."
+            exit 1
+          fi
+          echo "No credential-shaped literals found."
+
+      - name: Function code must not use Function keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -rn "AuthorizationLevel\.\(Function\|Admin\|System\)" src/; then
+            echo "::error::HTTP triggers must use AuthorizationLevel.Anonymous; Microsoft Entra ID authentication is enforced by App Service Authentication instead of Function keys."
+            exit 1
+          fi
+          echo "No Function-key authorization levels are used."

@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/function/">
+    <Project Path="src/function/SecureRequestClassifier.Functions.Tests/SecureRequestClassifier.Functions.Tests.csproj" />
+    <Project Path="src/function/SecureRequestClassifier.Functions/SecureRequestClassifier.Functions.csproj" />
+  </Folder>
+</Solution>

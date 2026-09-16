@@ -1,0 +1,44 @@
+# .NET
+bin/
+obj/
+[Bb]uild/
+[Oo]ut/
+publish/
+TestResults/
+*.user
+*.suo
+*.coverage
+coverage*.json
+coverage*.xml
+*.trx
+
+# Azure Functions
+local.settings.json
+.azurefunctions/
+
+# Power Platform build output
+powerplatform/out/
+*.msapp.bak
+
+# Rendered deployment settings contain live connection IDs and environment URLs.
+# Only the tokenised template is committed.
+deploymentSettings.json
+!powerplatform/config/deploymentSettings.template.json
+
+# Bicep build output
+infra/**/*.json
+!infra/bicepconfig.json
+!infra/parameters/*.json
+
+# Editors
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+.DS_Store
+
+# Local scratch
+scratch/
+*.log

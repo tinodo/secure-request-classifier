@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Category 5 = modern cloud flow.
+  StateCode 0 / StatusCode 1 = Draft.
+
+  The flow is deliberately imported in Draft state. Activation requires both connection
+  references to resolve to real connections, and the "HTTP with Microsoft Entra ID
+  (preauthorized)" connection is a delegated-user connection that has to be created once by a
+  human (see docs/limitations.md). The deployment workflow turns the flow on once the
+  deployment settings file supplies both connection IDs.
+-->
+<Workflow WorkflowId="{8f3a1c22-6d51-4f0b-9c7e-2a4b6d8e1f30}" Name="Classify and Notify" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <JsonFileName>/Workflows/ClassifyAndNotify-8F3A1C22-6D51-4F0B-9C7E-2A4B6D8E1F30.json</JsonFileName>
+  <Type>1</Type>
+  <Subprocess>0</Subprocess>
+  <Category>5</Category>
+  <Mode>0</Mode>
+  <Scope>4</Scope>
+  <OnDemand>0</OnDemand>
+  <TriggerOnCreate>0</TriggerOnCreate>
+  <TriggerOnDelete>0</TriggerOnDelete>
+  <AsyncAutodelete>0</AsyncAutodelete>
+  <SyncWorkflowLogOnFailure>0</SyncWorkflowLogOnFailure>
+  <StateCode>0</StateCode>
+  <StatusCode>1</StatusCode>
+  <RunAs>1</RunAs>
+  <IsTransacted>1</IsTransacted>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <BusinessProcessType>0</BusinessProcessType>
+  <IsCustomProcessingStepAllowedForOtherPublishers>1</IsCustomProcessingStepAllowedForOtherPublishers>
+  <PrimaryEntity>none</PrimaryEntity>
+  <LocalizedNames>
+    <LocalizedName languagecode="1033" description="Classify and Notify" />
+  </LocalizedNames>
+</Workflow>

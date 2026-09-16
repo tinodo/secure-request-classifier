@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<environmentvariabledefinition schemaname="srcls_EnvironmentLabel">
+  <displayname default="Environment label">
+    <label description="Environment label" languagecode="1033" />
+  </displayname>
+  <description default="Friendly label shown in the confirmation email, for example Demo or Contoso Sandbox.">
+    <label description="Friendly label shown in the confirmation email, for example Demo or Contoso Sandbox." languagecode="1033" />
+  </description>
+  <introducedversion>1.0.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

@@ -1,0 +1,17 @@
+{
+  "analyzers": {
+    "core": {
+      "enabled": true,
+      "rules": {
+        "no-hardcoded-env-urls": { "level": "error" },
+        "secure-parameter-default": { "level": "error" },
+        "outputs-should-not-contain-secrets": { "level": "error" },
+        "no-unused-params": { "level": "error" },
+        "no-unused-vars": { "level": "error" },
+        "prefer-interpolation": { "level": "warning" },
+        "use-stable-resource-identifiers": { "level": "warning" },
+        "use-recent-api-versions": { "level": "off" }
+      }
+    }
+  }
+}

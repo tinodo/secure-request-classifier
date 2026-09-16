@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Element order and casing below are significant: SolutionPackager expects every element to be
+  present (even when empty) and in this exact sequence. "optionsets" and "connectionreferences"
+  are intentionally lowercase; everything else is PascalCase.
+-->
+<ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Entities />
+  <Roles />
+  <Workflows />
+  <FieldSecurityProfiles />
+  <Templates />
+  <EntityMaps />
+  <EntityRelationships />
+  <OrganizationSettings />
+  <optionsets />
+  <CustomControls />
+  <SolutionPluginAssemblies />
+  <SdkMessageProcessingSteps />
+  <ServiceEndpoints />
+  <AppModuleSiteMaps />
+  <AppModules />
+  <EntityDataProviders />
+  <CanvasApps />
+  <Connectors />
+  <connectionreferences>
+    <!--
+      "HTTP with Microsoft Entra ID (preauthorized)".
+      This is the only HTTP-style connector on the Power Platform virtual network supported
+      services list, so it is the connector that carries the call to the private Azure Function.
+      https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview
+    -->
+    <connectionreference connectionreferencelogicalname="srcls_sharedwebcontents_classifier">
+      <connectionreferencedisplayname>Secure Request Classifier - private Azure Function</connectionreferencedisplayname>
+      <connectorid>/providers/Microsoft.PowerApps/apis/shared_webcontents</connectorid>
+      <iscustomizable>1</iscustomizable>
+      <statecode>0</statecode>
+      <statuscode>1</statuscode>
+    </connectionreference>
+    <!-- Office 365 Outlook, used only to send the confirmation email to the requester. -->
+    <connectionreference connectionreferencelogicalname="srcls_sharedoffice365_notify">
+      <connectionreferencedisplayname>Secure Request Classifier - Office 365 Outlook</connectionreferencedisplayname>
+      <connectorid>/providers/Microsoft.PowerApps/apis/shared_office365</connectorid>
+      <iscustomizable>1</iscustomizable>
+      <statecode>0</statecode>
+      <statuscode>1</statuscode>
+    </connectionreference>
+  </connectionreferences>
+  <Languages>
+    <Language>1033</Language>
+  </Languages>
+</ImportExportXml>

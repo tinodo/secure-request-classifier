@@ -1,0 +1,88 @@
+name: Destroy
+
+# Removes everything the demo created, and nothing else.
+#
+# Requires an explicit typed confirmation so it cannot be triggered by accident, and refuses to
+# delete a resource group that does not carry the demo's own workload tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type DESTROY to confirm
+        required: true
+        type: string
+      remove-entra-applications:
+        description: Also delete the app registrations created by the bootstrap script
+        type: boolean
+        default: false
+      unlink-power-platform:
+        description: Unlink the Power Platform environment from the enterprise policy first
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: destroy
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Destroy the demo
+    runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    steps:
+      - name: Check the confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "DESTROY" ]; then
+            echo "::error::Confirmation text did not match. Type DESTROY to proceed."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Remove the demo
+        shell: pwsh
+        run: |
+          $parameters = @{
+            ResourceGroupName = '${{ vars.RESOURCE_GROUP_NAME || 'rg-srclass-demo' }}'
+            Force             = $true
+            Confirm           = $false
+          }
+
+          if ('${{ inputs.unlink-power-platform }}' -eq 'true' -and '${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}') {
+            $parameters.PowerPlatformEnvironmentId = '${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}'
+          }
+
+          if ('${{ vars.POWER_PLATFORM_ENVIRONMENT_URL }}') {
+            $parameters.PowerPlatformEnvironmentUrl = '${{ vars.POWER_PLATFORM_ENVIRONMENT_URL }}'
+          }
+
+          if ('${{ inputs.remove-entra-applications }}' -eq 'true') {
+            $parameters.RemoveEntraApplications = $true
+          }
+
+          ./scripts/Remove-Demo.ps1 @parameters
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Cleanup"
+            echo
+            echo "Resource group \`${{ vars.RESOURCE_GROUP_NAME || 'rg-srclass-demo' }}\` deletion was requested."
+            echo
+            echo "Nothing outside that resource group was modified. The demo never used hub"
+            echo "networking, shared private DNS zones or any pre-existing resource, so there is"
+            echo "nothing else to unwind."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,333 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_webcontents": {
+        "runtimeSource": "invoker",
+        "connection": {
+          "connectionReferenceLogicalName": "srcls_sharedwebcontents_classifier"
+        },
+        "api": {
+          "name": "shared_webcontents"
+        }
+      },
+      "shared_office365": {
+        "runtimeSource": "invoker",
+        "connection": {
+          "connectionReferenceLogicalName": "srcls_sharedoffice365_notify"
+        },
+        "api": {
+          "name": "shared_office365"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        },
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "srcls_FunctionBaseUrl (srcls_FunctionBaseUrl)": {
+          "defaultValue": "",
+          "type": "String",
+          "metadata": {
+            "schemaName": "srcls_FunctionBaseUrl"
+          }
+        },
+        "srcls_FunctionClassifyPath (srcls_FunctionClassifyPath)": {
+          "defaultValue": "/api/requests/classify",
+          "type": "String",
+          "metadata": {
+            "schemaName": "srcls_FunctionClassifyPath"
+          }
+        },
+        "srcls_EnvironmentLabel (srcls_EnvironmentLabel)": {
+          "defaultValue": "Demo",
+          "type": "String",
+          "metadata": {
+            "schemaName": "srcls_EnvironmentLabel"
+          }
+        }
+      },
+      "triggers": {
+        "manual": {
+          "metadata": {
+            "operationMetadataId": "6f1b0e55-4a7c-4f2e-bd91-9c0e3a71d482"
+          },
+          "type": "Request",
+          "kind": "PowerAppV2",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "requesterName": {
+                  "title": "Requester name",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "Full name of the person raising the request",
+                  "x-ms-content-hint": "TEXT"
+                },
+                "requesterEmail": {
+                  "title": "Requester email",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "Mailbox that receives the confirmation",
+                  "x-ms-content-hint": "EMAIL"
+                },
+                "requestTitle": {
+                  "title": "Request title",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "Short summary of the request",
+                  "x-ms-content-hint": "TEXT"
+                },
+                "category": {
+                  "title": "Category",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "IT, Facilities, HR or Other",
+                  "x-ms-content-hint": "TEXT"
+                },
+                "impact": {
+                  "title": "Impact",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "Low, Medium or High",
+                  "x-ms-content-hint": "TEXT"
+                },
+                "description": {
+                  "title": "Description",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "Free-text detail",
+                  "x-ms-content-hint": "TEXT"
+                }
+              },
+              "required": [
+                "requesterName",
+                "requesterEmail",
+                "requestTitle",
+                "category",
+                "impact"
+              ]
+            }
+          }
+        }
+      },
+      "actions": {
+        "Initialize_correlation_id": {
+          "runAfter": {},
+          "metadata": {
+            "operationMetadataId": "1c8f2d70-5b41-4e93-a6d2-0f7b9e3c5a18"
+          },
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "correlationId",
+                "type": "string",
+                "value": "@{guid()}"
+              }
+            ]
+          }
+        },
+        "Compose_request_payload": {
+          "runAfter": {
+            "Initialize_correlation_id": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "2d9a3e81-6c52-4fa4-b7e3-1a8c0f4d6b29"
+          },
+          "type": "Compose",
+          "inputs": {
+            "requesterName": "@triggerBody()['requesterName']",
+            "requesterEmail": "@triggerBody()['requesterEmail']",
+            "title": "@triggerBody()['requestTitle']",
+            "category": "@triggerBody()['category']",
+            "impact": "@triggerBody()['impact']",
+            "description": "@triggerBody()['description']",
+            "correlationId": "@variables('correlationId')"
+          }
+        },
+        "Invoke_classification_API": {
+          "runAfter": {
+            "Compose_request_payload": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "3eab4f92-7d63-4b05-c8f4-2b9d1e5a7c3a"
+          },
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "connectionName": "shared_webcontents",
+              "operationId": "InvokeHttp",
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_webcontents"
+            },
+            "parameters": {
+              "method": "POST",
+              "url": "@{parameters('srcls_FunctionBaseUrl (srcls_FunctionBaseUrl)')}@{parameters('srcls_FunctionClassifyPath (srcls_FunctionClassifyPath)')}",
+              "headers": {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "x-correlation-id": "@variables('correlationId')"
+              },
+              "body": "@{string(outputs('Compose_request_payload'))}"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Parse_classification_response": {
+          "runAfter": {
+            "Invoke_classification_API": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "4fbc50a3-8e74-4c16-d9a5-3cae2f6b8d4b"
+          },
+          "type": "ParseJson",
+          "inputs": {
+            "content": "@body('Invoke_classification_API')",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "requestId": { "type": "string" },
+                "status": { "type": "string" },
+                "priority": { "type": "string" },
+                "priorityRank": { "type": "integer" },
+                "assignedTeam": { "type": "string" },
+                "normalizedCategory": { "type": "string" },
+                "normalizedImpact": { "type": "string" },
+                "targetResponseDate": { "type": "string" },
+                "slaBusinessHours": { "type": "integer" },
+                "receivedAtUtc": { "type": "string" },
+                "requesterName": { "type": "string" },
+                "requesterEmail": { "type": "string" },
+                "title": { "type": "string" },
+                "classificationReason": { "type": "string" },
+                "notes": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "correlationId": { "type": "string" }
+              }
+            }
+          }
+        },
+        "Send_confirmation_email": {
+          "runAfter": {
+            "Parse_classification_response": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "50cd61b4-9f85-4d27-ea16-4dbf306c9e5c"
+          },
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "connectionName": "shared_office365",
+              "operationId": "SendEmailV2",
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365"
+            },
+            "parameters": {
+              "emailMessage/To": "@body('Parse_classification_response')?['requesterEmail']",
+              "emailMessage/Subject": "@{body('Parse_classification_response')?['requestId']} - @{body('Parse_classification_response')?['priority']} - @{body('Parse_classification_response')?['title']}",
+              "emailMessage/Body": "<p>Hello @{body('Parse_classification_response')?['requesterName']},</p><p>Your request has been received and classified.</p><table border=\"0\" cellpadding=\"6\"><tr><td><strong>Request ID</strong></td><td>@{body('Parse_classification_response')?['requestId']}</td></tr><tr><td><strong>Priority</strong></td><td>@{body('Parse_classification_response')?['priority']}</td></tr><tr><td><strong>Assigned team</strong></td><td>@{body('Parse_classification_response')?['assignedTeam']}</td></tr><tr><td><strong>Category</strong></td><td>@{body('Parse_classification_response')?['normalizedCategory']}</td></tr><tr><td><strong>Impact</strong></td><td>@{body('Parse_classification_response')?['normalizedImpact']}</td></tr><tr><td><strong>Response target</strong></td><td>@{body('Parse_classification_response')?['targetResponseDate']} UTC</td></tr></table><p>@{body('Parse_classification_response')?['classificationReason']}</p><p style=\"color:#666;font-size:12px\">Classified by the Secure Request Classifier (@{parameters('srcls_EnvironmentLabel (srcls_EnvironmentLabel)')}). The classification service has no public endpoint; this request was processed over private networking. Correlation ID @{body('Parse_classification_response')?['correlationId']}.</p>",
+              "emailMessage/Importance": "Normal"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        },
+        "Respond_to_the_app": {
+          "runAfter": {
+            "Send_confirmation_email": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "61de72c5-a096-4e38-fb27-5ec0417daf6d"
+          },
+          "type": "Response",
+          "kind": "PowerApp",
+          "inputs": {
+            "statusCode": 200,
+            "body": {
+              "requestId": "@body('Parse_classification_response')?['requestId']",
+              "status": "@body('Parse_classification_response')?['status']",
+              "priority": "@body('Parse_classification_response')?['priority']",
+              "assignedTeam": "@body('Parse_classification_response')?['assignedTeam']",
+              "normalizedCategory": "@body('Parse_classification_response')?['normalizedCategory']",
+              "targetResponseDate": "@body('Parse_classification_response')?['targetResponseDate']",
+              "classificationReason": "@body('Parse_classification_response')?['classificationReason']",
+              "correlationId": "@body('Parse_classification_response')?['correlationId']"
+            },
+            "schema": {
+              "type": "object",
+              "properties": {
+                "requestId": { "title": "requestId", "x-ms-dynamically-added": true, "type": "string" },
+                "status": { "title": "status", "x-ms-dynamically-added": true, "type": "string" },
+                "priority": { "title": "priority", "x-ms-dynamically-added": true, "type": "string" },
+                "assignedTeam": { "title": "assignedTeam", "x-ms-dynamically-added": true, "type": "string" },
+                "normalizedCategory": { "title": "normalizedCategory", "x-ms-dynamically-added": true, "type": "string" },
+                "targetResponseDate": { "title": "targetResponseDate", "x-ms-dynamically-added": true, "type": "string" },
+                "classificationReason": { "title": "classificationReason", "x-ms-dynamically-added": true, "type": "string" },
+                "correlationId": { "title": "correlationId", "x-ms-dynamically-added": true, "type": "string" }
+              }
+            }
+          }
+        },
+        "Respond_with_the_failure": {
+          "runAfter": {
+            "Invoke_classification_API": [
+              "Failed",
+              "TimedOut"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "72ef83d6-b1a7-4f49-0c38-6fd15284b07e"
+          },
+          "type": "Response",
+          "kind": "PowerApp",
+          "inputs": {
+            "statusCode": 502,
+            "body": {
+              "requestId": "",
+              "status": "Failed",
+              "priority": "",
+              "assignedTeam": "",
+              "normalizedCategory": "",
+              "targetResponseDate": "",
+              "classificationReason": "@{concat('The classification service could not be reached or returned an error. Correlation ID ', variables('correlationId'), '. Check that the Power Platform environment is linked to the virtual network enterprise policy and that the private endpoint resolves.')}",
+              "correlationId": "@variables('correlationId')"
+            },
+            "schema": {
+              "type": "object",
+              "properties": {
+                "requestId": { "title": "requestId", "x-ms-dynamically-added": true, "type": "string" },
+                "status": { "title": "status", "x-ms-dynamically-added": true, "type": "string" },
+                "priority": { "title": "priority", "x-ms-dynamically-added": true, "type": "string" },
+                "assignedTeam": { "title": "assignedTeam", "x-ms-dynamically-added": true, "type": "string" },
+                "normalizedCategory": { "title": "normalizedCategory", "x-ms-dynamically-added": true, "type": "string" },
+                "targetResponseDate": { "title": "targetResponseDate", "x-ms-dynamically-added": true, "type": "string" },
+                "classificationReason": { "title": "classificationReason", "x-ms-dynamically-added": true, "type": "string" },
+                "correlationId": { "title": "correlationId", "x-ms-dynamically-added": true, "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "outputs": {}
+    }
+  },
+  "schemaVersion": "1.0.0.0"
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<environmentvariabledefinition schemaname="srcls_FunctionApplicationIdUri">
+  <displayname default="Function Application ID URI">
+    <label description="Function Application ID URI" languagecode="1033" />
+  </displayname>
+  <description default="Application ID URI of the Microsoft Entra ID app registration protecting the Function App, for example api://00000000-0000-0000-0000-000000000000. Used when creating the HTTP with Microsoft Entra ID connection.">
+    <label description="Application ID URI of the Microsoft Entra ID app registration protecting the Function App, for example api://00000000-0000-0000-0000-000000000000. Used when creating the HTTP with Microsoft Entra ID connection." languagecode="1033" />
+  </description>
+  <introducedversion>1.0.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>1</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

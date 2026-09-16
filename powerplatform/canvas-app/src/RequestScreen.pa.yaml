@@ -1,0 +1,309 @@
+# Power Fx / Power Apps YAML source for the "Secure Request Classifier" canvas app.
+#
+# This is the human-readable, reviewable source of truth for the app. It is the same format
+# that Power Platform Git integration produces for canvas apps.
+#
+# See ../README.md for why the binary .msapp cannot be produced from this file by CI, and for
+# the exact one-time action that produces it.
+#
+# The app calls a single solution-aware cloud flow, 'ClassifyAndNotify'. The flow - not the
+# app - is what traverses the Power Platform delegated subnet to reach the private Azure
+# Function, so the app itself stays deliberately plain.
+
+App:
+  Properties:
+    BackEnabled: =false
+    Theme: =PowerAppsTheme
+    OnStart: |
+      =Set(
+          varSubmitting,
+          false
+      );
+      Set(
+          varResult,
+          Blank()
+      );
+      Set(
+          varErrorMessage,
+          ""
+      )
+
+Screens:
+  RequestScreen:
+    Properties:
+      Fill: =RGBA(243, 242, 241, 1)
+    Children:
+      - HeaderRectangle:
+          Control: Rectangle
+          Properties:
+            Fill: =RGBA(0, 90, 158, 1)
+            Height: =88
+            Width: =Parent.Width
+            X: =0
+            Y: =0
+
+      - TitleLabel:
+          Control: Label
+          Properties:
+            Text: ="Secure Request Classifier"
+            Color: =RGBA(255, 255, 255, 1)
+            Size: =22
+            FontWeight: =FontWeight.Semibold
+            X: =32
+            Y: =16
+            Width: =Parent.Width - 64
+            Height: =32
+
+      - SubtitleLabel:
+          Control: Label
+          Properties:
+            Text: ="Classified by a private Azure Function with no public endpoint"
+            Color: =RGBA(219, 233, 246, 1)
+            Size: =12
+            X: =32
+            Y: =48
+            Width: =Parent.Width - 64
+            Height: =24
+
+      - RequesterNameLabel:
+          Control: Label
+          Properties:
+            Text: ="Requester name"
+            Size: =12
+            FontWeight: =FontWeight.Semibold
+            X: =32
+            Y: =112
+            Width: =320
+            Height: =24
+
+      - RequesterNameInput:
+          Control: TextInput
+          Properties:
+            Default: =""
+            HintText: ="Your full name"
+            X: =32
+            Y: =136
+            Width: =320
+            Height: =40
+
+      - RequesterEmailLabel:
+          Control: Label
+          Properties:
+            Text: ="Requester email"
+            Size: =12
+            FontWeight: =FontWeight.Semibold
+            X: =376
+            Y: =112
+            Width: =320
+            Height: =24
+
+      - RequesterEmailInput:
+          Control: TextInput
+          Properties:
+            Default: =User().Email
+            HintText: ="name@contoso.com"
+            X: =376
+            Y: =136
+            Width: =320
+            Height: =40
+
+      - RequestTitleLabel:
+          Control: Label
+          Properties:
+            Text: ="Request title"
+            Size: =12
+            FontWeight: =FontWeight.Semibold
+            X: =32
+            Y: =192
+            Width: =664
+            Height: =24
+
+      - RequestTitleInput:
+          Control: TextInput
+          Properties:
+            Default: =""
+            HintText: ="Short summary, 3 to 120 characters"
+            X: =32
+            Y: =216
+            Width: =664
+            Height: =40
+
+      - CategoryLabel:
+          Control: Label
+          Properties:
+            Text: ="Category"
+            Size: =12
+            FontWeight: =FontWeight.Semibold
+            X: =32
+            Y: =272
+            Width: =320
+            Height: =24
+
+      - CategoryDropdown:
+          Control: Dropdown
+          Properties:
+            Items: =["IT", "Facilities", "HR", "Other"]
+            Default: ="IT"
+            X: =32
+            Y: =296
+            Width: =320
+            Height: =40
+
+      - ImpactLabel:
+          Control: Label
+          Properties:
+            Text: ="Impact"
+            Size: =12
+            FontWeight: =FontWeight.Semibold
+            X: =376
+            Y: =272
+            Width: =320
+            Height: =24
+
+      - ImpactDropdown:
+          Control: Dropdown
+          Properties:
+            Items: =["Low", "Medium", "High"]
+            Default: ="Medium"
+            X: =376
+            Y: =296
+            Width: =320
+            Height: =40
+
+      - DescriptionLabel:
+          Control: Label
+          Properties:
+            Text: ="Description"
+            Size: =12
+            FontWeight: =FontWeight.Semibold
+            X: =32
+            Y: =352
+            Width: =664
+            Height: =24
+
+      - DescriptionInput:
+          Control: TextInput
+          Properties:
+            Default: =""
+            HintText: ="Optional detail, up to 2000 characters"
+            Mode: =TextMode.MultiLine
+            X: =32
+            Y: =376
+            Width: =664
+            Height: =96
+
+      - SubmitButton:
+          Control: Button
+          Properties:
+            Text: =If(varSubmitting, "Submitting...", "Submit")
+            DisplayMode: |
+              =If(
+                  varSubmitting
+                      || IsBlank(Trim(RequesterNameInput.Text))
+                      || IsBlank(Trim(RequesterEmailInput.Text))
+                      || Len(Trim(RequestTitleInput.Text)) < 3,
+                  DisplayMode.Disabled,
+                  DisplayMode.Edit
+              )
+            Fill: =RGBA(0, 90, 158, 1)
+            X: =32
+            Y: =492
+            Width: =200
+            Height: =44
+            OnSelect: |
+              =Set(
+                  varSubmitting,
+                  true
+              );
+              Set(
+                  varErrorMessage,
+                  ""
+              );
+              Set(
+                  varResult,
+                  Blank()
+              );
+              IfError(
+                  Set(
+                      varResult,
+                      ClassifyandNotify.Run(
+                          Trim(RequesterNameInput.Text),
+                          Trim(RequesterEmailInput.Text),
+                          Trim(RequestTitleInput.Text),
+                          CategoryDropdown.Selected.Value,
+                          ImpactDropdown.Selected.Value,
+                          Trim(DescriptionInput.Text)
+                      )
+                  ),
+                  Set(
+                      varErrorMessage,
+                      "The request could not be classified. The flow reached the classification service over private networking; check the flow run history for detail. " & FirstError.Message
+                  )
+              );
+              Set(
+                  varSubmitting,
+                  false
+              )
+
+      - ResultCard:
+          Control: Rectangle
+          Properties:
+            Fill: =RGBA(255, 255, 255, 1)
+            Visible: =!IsBlank(varResult)
+            X: =32
+            Y: =556
+            Width: =664
+            Height: =180
+
+      - ResultHeadingLabel:
+          Control: Label
+          Properties:
+            Text: ="Request accepted"
+            Size: =16
+            FontWeight: =FontWeight.Semibold
+            Color: =RGBA(16, 124, 16, 1)
+            Visible: =!IsBlank(varResult)
+            X: =48
+            Y: =568
+            Width: =632
+            Height: =28
+
+      - ResultDetailLabel:
+          Control: Label
+          Properties:
+            Text: |
+              ="Request ID: " & varResult.requestId
+              & Char(10) & "Priority: " & varResult.priority
+              & Char(10) & "Assigned team: " & varResult.assignedTeam
+              & Char(10) & "Category: " & varResult.normalizedCategory
+              & Char(10) & "Response target: " & varResult.targetResponseDate & " UTC"
+            Size: =13
+            Visible: =!IsBlank(varResult)
+            X: =48
+            Y: =600
+            Width: =632
+            Height: =100
+
+      - ResultFooterLabel:
+          Control: Label
+          Properties:
+            Text: ="A confirmation email is on its way. The classification service has no public endpoint."
+            Size: =11
+            Color: =RGBA(96, 94, 92, 1)
+            Visible: =!IsBlank(varResult)
+            X: =48
+            Y: =700
+            Width: =632
+            Height: =24
+
+      - ErrorLabel:
+          Control: Label
+          Properties:
+            Text: =varErrorMessage
+            Color: =RGBA(168, 0, 0, 1)
+            Size: =13
+            Visible: =!IsBlank(varErrorMessage)
+            X: =32
+            Y: =556
+            Width: =664
+            Height: =80

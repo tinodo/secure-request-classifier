@@ -1,0 +1,467 @@
+name: Deploy
+
+# Single orchestrating workflow for the whole demo.
+#
+# Fork the repository, run scripts/Initialize-EntraResources.ps1 once, set the repository
+# variables it prints, then run this workflow. There is no other required order of operations.
+#
+# Authentication to Azure and to Power Platform is entirely by GitHub OIDC / workload identity
+# federation. This workflow reads repository VARIABLES only; it never reads a secret, because
+# there is no secret to read.
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy-infrastructure:
+        description: Deploy the Azure infrastructure
+        type: boolean
+        default: true
+      deploy-function:
+        description: Build and deploy the Azure Function
+        type: boolean
+        default: true
+      deploy-power-platform:
+        description: Import the Power Platform solution
+        type: boolean
+        default: true
+      link-enterprise-policy:
+        description: Link the Power Platform environment to the virtual network enterprise policy
+        type: boolean
+        default: true
+      run-verification:
+        description: Run post-deployment verification
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'infra/**'
+      - 'powerplatform/**'
+      - 'scripts/**'
+      - '.github/workflows/deploy.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  FUNCTION_PROJECT: src/function/SecureRequestClassifier.Functions/SecureRequestClassifier.Functions.csproj
+  # Flex Consumption requires the deployed package to be named released-package.zip.
+  BUILD_ARTIFACT_NAME: released-package
+
+jobs:
+  # -------------------------------------------------------------------------------------------
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    outputs:
+      solution-built: ${{ steps.solution.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory ./TestResults
+
+      - name: Lint Bicep
+        run: |
+          az bicep install
+          az bicep build --file infra/main.bicep --outfile /tmp/main.json
+          az bicep build-params --file infra/parameters/demo.bicepparam --outfile /tmp/main.parameters.json
+          echo "Bicep compiled with no errors."
+
+      - name: Check cross-artefact consistency
+        shell: pwsh
+        run: ./scripts/Test-RepositoryConsistency.ps1
+
+      - uses: microsoft/powerplatform-actions/actions-install@v1
+
+      - name: Pack the Power Platform solution
+        id: solution
+        shell: pwsh
+        run: ./scripts/Build-Solution.ps1
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: ./TestResults
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------------------------
+  build-function:
+    name: Build function package
+    needs: validate
+    if: ${{ inputs.deploy-function != false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish
+        run: dotnet publish ${{ env.FUNCTION_PROJECT }} --configuration Release --output ./publish
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.BUILD_ARTIFACT_NAME }}
+          path: ./publish
+          # Required for .NET projects: the publish output contains dot-prefixed files.
+          include-hidden-files: true
+
+  # -------------------------------------------------------------------------------------------
+  infrastructure:
+    name: Deploy Azure infrastructure
+    needs: validate
+    if: ${{ inputs.deploy-infrastructure != false }}
+    runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    outputs:
+      resource-group: ${{ steps.deploy.outputs.resourceGroupName }}
+      function-app-name: ${{ steps.deploy.outputs.functionAppName }}
+      function-base-url: ${{ steps.deploy.outputs.functionAppBaseUrl }}
+      enterprise-policy-id: ${{ steps.deploy.outputs.enterprisePolicyResourceId }}
+      primary-location: ${{ steps.deploy.outputs.primaryLocation }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Register required resource providers
+        run: |
+          set -euo pipefail
+          for provider in Microsoft.Network Microsoft.Web Microsoft.App Microsoft.Storage Microsoft.PowerPlatform Microsoft.Insights Microsoft.OperationalInsights; do
+            state=$(az provider show --namespace "$provider" --query registrationState --output tsv 2>/dev/null || echo "NotFound")
+            if [ "$state" != "Registered" ]; then
+              echo "Registering $provider (currently $state)"
+              az provider register --namespace "$provider" --wait
+            else
+              echo "$provider already registered"
+            fi
+          done
+
+      - name: Deploy infrastructure
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LOCATION="${{ vars.AZURE_LOCATION || 'westeurope' }}"
+          DEPLOYMENT_NAME="srclass-$(date +%Y%m%d%H%M%S)"
+
+          EXTRA_PARAMS=()
+          [ -n "${{ vars.AZURE_API_APP_ID }}" ] && EXTRA_PARAMS+=("apiApplicationId=${{ vars.AZURE_API_APP_ID }}")
+          [ -n "${{ vars.POWER_PLATFORM_REGION }}" ] && EXTRA_PARAMS+=("powerPlatformRegion=${{ vars.POWER_PLATFORM_REGION }}")
+          [ -n "${{ vars.RESOURCE_GROUP_NAME }}" ] && EXTRA_PARAMS+=("resourceGroupName=${{ vars.RESOURCE_GROUP_NAME }}")
+          [ -n "${{ vars.CREATE_PRIVATE_DNS_ZONES }}" ] && EXTRA_PARAMS+=("createPrivateDnsZones=${{ vars.CREATE_PRIVATE_DNS_ZONES }}")
+          [ -n "${{ vars.CREATE_PRIVATE_DNS_ZONE_GROUPS }}" ] && EXTRA_PARAMS+=("createPrivateDnsZoneGroups=${{ vars.CREATE_PRIVATE_DNS_ZONE_GROUPS }}")
+
+          # The Power Platform administrator identity needs Reader on the enterprise policy in
+          # order to link it to an environment.
+          READER_IDS="[]"
+          if [ -n "${{ vars.POWER_PLATFORM_ADMIN_OBJECT_ID }}" ]; then
+            READER_IDS="[\"${{ vars.POWER_PLATFORM_ADMIN_OBJECT_ID }}\"]"
+          fi
+
+          echo "::group::Deployment parameters"
+          echo "location            $LOCATION"
+          echo "extra parameters    ${EXTRA_PARAMS[*]:-none}"
+          echo "::endgroup::"
+
+          az deployment sub create \
+            --name "$DEPLOYMENT_NAME" \
+            --location "$LOCATION" \
+            --template-file infra/main.bicep \
+            --parameters infra/parameters/demo.bicepparam \
+            --parameters enterprisePolicyReaderPrincipalIds="$READER_IDS" \
+            ${EXTRA_PARAMS[@]+"${EXTRA_PARAMS[@]/#/--parameters }"} \
+            --output none
+
+          echo "::group::Deployment outputs"
+          az deployment sub show --name "$DEPLOYMENT_NAME" --query properties.outputs --output json
+          echo "::endgroup::"
+
+          az deployment sub show --name "$DEPLOYMENT_NAME" --query properties.outputs --output json > outputs.json
+
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          with open('outputs.json') as handle:
+              outputs = json.load(handle)
+          for key, item in outputs.items():
+              value = item.get('value', '')
+              if isinstance(value, bool):
+                  value = str(value).lower()
+              print(f"{key}={value}")
+          PY
+
+      - name: Summarise
+        run: |
+          {
+            echo "## Azure infrastructure"
+            echo
+            echo "| Output | Value |"
+            echo "| --- | --- |"
+            echo "| Resource group | \`${{ steps.deploy.outputs.resourceGroupName }}\` |"
+            echo "| Function App | \`${{ steps.deploy.outputs.functionAppName }}\` |"
+            echo "| Function base URL | \`${{ steps.deploy.outputs.functionAppBaseUrl }}\` |"
+            echo "| Primary region | \`${{ steps.deploy.outputs.primaryLocation }}\` |"
+            echo "| Failover region | \`${{ steps.deploy.outputs.failoverLocation }}\` |"
+            echo "| Enterprise policy | \`${{ steps.deploy.outputs.enterprisePolicyResourceId }}\` |"
+            echo
+            echo "The Function App is deployed with \`publicNetworkAccess: Disabled\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------------------------
+  deploy-function:
+    name: Deploy function code
+    needs: [infrastructure, build-function]
+    if: ${{ inputs.deploy-function != false && needs.infrastructure.result == 'success' }}
+    # Set FUNCTION_DEPLOY_RUNNER_LABEL to a self-hosted runner (or a GitHub-hosted larger
+    # runner with Azure private networking) to deploy without ever opening public access.
+    runs-on: ${{ vars.FUNCTION_DEPLOY_RUNNER_LABEL || 'ubuntu-latest' }}
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    env:
+      RESOURCE_GROUP: ${{ needs.infrastructure.outputs.resource-group }}
+      FUNCTION_APP: ${{ needs.infrastructure.outputs.function-app-name }}
+      DEPLOY_MODE: ${{ vars.FUNCTION_DEPLOY_MODE || 'deployment-window' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download package
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.BUILD_ARTIFACT_NAME }}
+          path: ./publish
+
+      - name: Explain the deployment path
+        run: |
+          {
+            echo "## Function deployment"
+            echo
+            echo "Mode: \`$DEPLOY_MODE\`"
+            echo
+            if [ "$DEPLOY_MODE" = "private-runner" ]; then
+              echo "Deploying from a network-connected runner. Public network access is never enabled."
+            else
+              echo "Microsoft documents that when a function app has a private endpoint and public"
+              echo "network access is disabled, the deployment endpoint is not publicly reachable, and"
+              echo "the runner must have network connectivity and DNS resolution for that private"
+              echo "endpoint ([Azure Functions deployment technologies](https://learn.microsoft.com/en-us/azure/azure-functions/functions-deployment-technologies))."
+              echo
+              echo "A standard GitHub-hosted runner has neither, so this job opens a deployment window:"
+              echo "public access is enabled and immediately restricted to this runner's egress IP"
+              echo "address only, with a default action of Deny. The window is closed and"
+              echo "\`publicNetworkAccess\` is set back to \`Disabled\` in an \`if: always()\` step."
+              echo
+              echo "The runtime path is never affected: Power Automate always reaches the app through"
+              echo "the private endpoint. Set \`FUNCTION_DEPLOY_MODE=private-runner\` to avoid the"
+              echo "window entirely."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open deployment window
+        id: window
+        if: env.DEPLOY_MODE != 'private-runner'
+        shell: pwsh
+        run: |
+          ./scripts/Set-FunctionAppDeploymentWindow.ps1 `
+            -Action Open `
+            -ResourceGroupName $env:RESOURCE_GROUP `
+            -FunctionAppName $env:FUNCTION_APP `
+            -Confirm:$false
+
+      - name: Deploy
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ env.FUNCTION_APP }}
+          package: ./publish
+          sku: flexconsumption
+
+      - name: Close deployment window
+        if: always() && env.DEPLOY_MODE != 'private-runner'
+        shell: pwsh
+        run: |
+          ./scripts/Set-FunctionAppDeploymentWindow.ps1 `
+            -Action Close `
+            -ResourceGroupName $env:RESOURCE_GROUP `
+            -FunctionAppName $env:FUNCTION_APP `
+            -Confirm:$false
+
+      - name: Assert the app is sealed
+        if: always()
+        run: |
+          set -euo pipefail
+          state=$(az resource show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$FUNCTION_APP" \
+            --resource-type Microsoft.Web/sites \
+            --query properties.publicNetworkAccess --output tsv)
+          echo "publicNetworkAccess = $state"
+          if [ "$state" != "Disabled" ]; then
+            echo "::error::Function App public network access is '$state'; it must end as 'Disabled'."
+            exit 1
+          fi
+          echo "::notice::Function App public network access is Disabled."
+
+  # -------------------------------------------------------------------------------------------
+  link-enterprise-policy:
+    name: Link Power Platform to the virtual network
+    needs: infrastructure
+    if: ${{ inputs.link-enterprise-policy != false && vars.POWER_PLATFORM_ENVIRONMENT_ID != '' }}
+    runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install the Power Platform enterprise policies module
+        shell: pwsh
+        run: |
+          Install-Module -Name Microsoft.PowerPlatform.EnterprisePolicies -Force -Scope CurrentUser -AllowClobber -ErrorAction Continue
+          if (-not (Get-Module -ListAvailable Microsoft.PowerPlatform.EnterprisePolicies)) {
+            Write-Warning 'Module unavailable; the script will use the REST fallback.'
+          }
+
+      - name: Link the environment to the enterprise policy
+        shell: pwsh
+        run: |
+          ./scripts/Set-PowerPlatformSubnetInjection.ps1 `
+            -EnvironmentId '${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}' `
+            -EnterprisePolicyResourceId '${{ needs.infrastructure.outputs.enterprise-policy-id }}' `
+            -Action Link `
+            -Confirm:$false
+
+  # -------------------------------------------------------------------------------------------
+  power-platform:
+    name: Deploy Power Platform solution
+    needs: [infrastructure, deploy-function]
+    if: ${{ always() && inputs.deploy-power-platform != false && needs.infrastructure.result == 'success' && vars.POWER_PLATFORM_ENVIRONMENT_URL != '' }}
+    runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: microsoft/powerplatform-actions/actions-install@v1
+
+      - name: Pack the solution
+        shell: pwsh
+        run: ./scripts/Build-Solution.ps1 -SolutionType Unmanaged
+
+      - name: Render deployment settings
+        shell: pwsh
+        env:
+          FUNCTION_BASE_URL: ${{ needs.infrastructure.outputs.function-base-url }}
+          FUNCTION_APPLICATION_ID_URI: ${{ vars.AZURE_API_APP_ID_URI }}
+          ENVIRONMENT_LABEL: ${{ vars.ENVIRONMENT_LABEL || 'Demo' }}
+          CONNECTION_ID_WEBCONTENTS: ${{ vars.POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS }}
+          CONNECTION_ID_OFFICE365: ${{ vars.POWER_PLATFORM_CONNECTION_ID_OFFICE365 }}
+        run: |
+          ./scripts/New-DeploymentSettings.ps1 `
+            -OutputPath ./powerplatform/out/deploymentSettings.json `
+            -AllowMissingConnections
+
+      - name: Import the solution
+        # Federation is selected implicitly: app-id and tenant-id are supplied and
+        # client-secret is deliberately omitted. There is no secret in this repository.
+        uses: microsoft/powerplatform-actions/import-solution@v1
+        with:
+          environment-url: ${{ vars.POWER_PLATFORM_ENVIRONMENT_URL }}
+          app-id: ${{ vars.POWER_PLATFORM_APP_ID }}
+          tenant-id: ${{ vars.POWER_PLATFORM_TENANT_ID }}
+          solution-file: powerplatform/out/SecureRequestClassifier.zip
+          use-deployment-settings-file: true
+          deployment-settings-file: powerplatform/out/deploymentSettings.json
+          force-overwrite: true
+          publish-changes: true
+          run-asynchronously: true
+          max-async-wait-time: 60
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Power Platform"
+            echo
+            echo "| Setting | Value |"
+            echo "| --- | --- |"
+            echo "| Environment | \`${{ vars.POWER_PLATFORM_ENVIRONMENT_URL }}\` |"
+            echo "| Solution | \`SecureRequestClassifier\` |"
+            echo "| Function base URL | \`${{ needs.infrastructure.outputs.function-base-url }}\` |"
+            echo "| Authentication | GitHub OIDC (workload identity federation), no client secret |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------------------------
+  verify:
+    name: Verify
+    needs: [infrastructure, deploy-function, power-platform, link-enterprise-policy]
+    if: ${{ always() && inputs.run-verification != false && needs.infrastructure.result == 'success' }}
+    runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify the deployment
+        shell: pwsh
+        run: |
+          $parameters = @{
+            ResourceGroupName = '${{ needs.infrastructure.outputs.resource-group }}'
+          }
+          if ('${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}') {
+            $parameters.PowerPlatformEnvironmentId = '${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}'
+          }
+          ./scripts/Test-Deployment.ps1 @parameters
+
+      - name: Prove private connectivity
+        if: ${{ vars.RUN_CONNECTIVITY_PROBE == 'true' }}
+        shell: pwsh
+        run: |
+          ./scripts/Invoke-PrivateConnectivityProbe.ps1 `
+            -ResourceGroupName '${{ needs.infrastructure.outputs.resource-group }}'

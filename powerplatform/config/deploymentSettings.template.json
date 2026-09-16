@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/powerplatform-actions/main/schemas/deploymentSettings.schema.json",
+
+  "//": [
+    "Deployment settings for `pac solution import --settings-file`.",
+    "",
+    "Tokens of the form #{NAME}# are replaced at deployment time by",
+    "scripts/New-DeploymentSettings.ps1 using GitHub repository VARIABLES (never secrets) and",
+    "outputs from the Bicep deployment. Commit this template; never commit a rendered copy",
+    "with real connection IDs.",
+    "",
+    "ConnectionId values are the GUIDs of connections that already exist in the target Power",
+    "Platform environment. The 'HTTP with Microsoft Entra ID (preauthorized)' connector uses a",
+    "delegated-user connection that has to be created once by a person; see docs/limitations.md."
+  ],
+
+  "EnvironmentVariables": [
+    {
+      "SchemaName": "srcls_FunctionBaseUrl",
+      "Value": "#{FUNCTION_BASE_URL}#"
+    },
+    {
+      "SchemaName": "srcls_FunctionClassifyPath",
+      "Value": "/api/requests/classify"
+    },
+    {
+      "SchemaName": "srcls_FunctionApplicationIdUri",
+      "Value": "#{FUNCTION_APPLICATION_ID_URI}#"
+    },
+    {
+      "SchemaName": "srcls_EnvironmentLabel",
+      "Value": "#{ENVIRONMENT_LABEL}#"
+    }
+  ],
+
+  "ConnectionReferences": [
+    {
+      "LogicalName": "srcls_sharedwebcontents_classifier",
+      "ConnectionId": "#{CONNECTION_ID_WEBCONTENTS}#",
+      "ConnectorId": "/providers/Microsoft.PowerApps/apis/shared_webcontents"
+    },
+    {
+      "LogicalName": "srcls_sharedoffice365_notify",
+      "ConnectionId": "#{CONNECTION_ID_OFFICE365}#",
+      "ConnectorId": "/providers/Microsoft.PowerApps/apis/shared_office365"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<environmentvariabledefinition schemaname="srcls_FunctionClassifyPath">
+  <displayname default="Function classify path">
+    <label description="Function classify path" languagecode="1033" />
+  </displayname>
+  <description default="Path of the classification endpoint. Defaults to /api/requests/classify.">
+    <label description="Path of the classification endpoint. Defaults to /api/requests/classify." languagecode="1033" />
+  </description>
+  <introducedversion>1.0.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>1</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>
