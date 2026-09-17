@@ -136,12 +136,16 @@ registration before the first deployment, so there is no case where an empty val
 param apiApplicationId string
 
 @description('''
-Application (client) ID of the Microsoft Entra ID application used by the "HTTP with Microsoft
-Entra ID (preauthorized)" connector. Microsoft publishes this value in
-microsoft/PowerApps-Samples/powershell/connectors/HTTPWithMicrosoftEntraId/ManagePermissionGrant.ps1
-as `$HttpWithAADAppAppId`.
+OAuth client application ID of the "HTTP with Microsoft Entra ID (preauthorized)" connector
+(shared_webcontents). This is Microsoft's first-party "App Service" application - which is what
+"preauthorized" in the connector name refers to.
+
+Not d2ebd3a9-1ada-4480-8b2d-eac162716601: that is shared_webcontentsv2, a different connector
+that is not virtual network supported. Read from the live connector definition, not from docs:
+properties.connectionParameters.token.oAuthSettings.clientId on
+/providers/Microsoft.PowerApps/apis/shared_webcontents.
 ''')
-param httpWithEntraIdConnectorAppId string = 'd2ebd3a9-1ada-4480-8b2d-eac162716601'
+param httpWithEntraIdConnectorAppId string = '7ab7862c-4c57-491e-8a45-d52a7e023983'
 
 @description('Additional application (client) IDs permitted to call the Function App.')
 param additionalAllowedClientAppIds string[] = []

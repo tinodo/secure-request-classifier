@@ -292,14 +292,73 @@ Assert-True -Name "Remove-Demo guards on the same tag value ($workloadTag)" `
     -Condition ($removeScript -match [regex]::Escape($workloadTag))
 
 # ---------------------------------------------------------------------------------------------
-# 11. The connector application ID must be identical everywhere it appears
+# Connector action parameters must use slash notation for body properties
+#
+# An OpenApiConnection action addresses a body parameter's properties as
+# "<bodyParameter>/<property>" - emailMessage/To, request/method. Supplying them flat binds
+# nothing: the solution imports, the flow saves, and the designer shows every field empty with
+# the required ones missing. scripts/Test-FlowConnectorParameters.ps1 checks this properly
+# against the live connector schema; this is the offline approximation CI can run.
 # ---------------------------------------------------------------------------------------------
 
-$connectorAppId = 'd2ebd3a9-1ada-4480-8b2d-eac162716601'
+$knownFlatParameters = @{
+    'InvokeHttp'  = @('method', 'url', 'headers', 'body')
+    'SendEmailV2' = @('To', 'Subject', 'Body', 'Importance', 'Cc', 'Bcc')
+}
+
+foreach ($action in $flow.properties.definition.actions.PSObject.Properties) {
+    if ($action.Value.type -ne 'OpenApiConnection') { continue }
+
+    $operationId = $action.Value.inputs.host.operationId
+    if (-not $knownFlatParameters.ContainsKey($operationId)) { continue }
+
+    foreach ($supplied in $action.Value.inputs.parameters.PSObject.Properties) {
+        $isBare = $knownFlatParameters[$operationId] -contains $supplied.Name
+
+        Assert-True -Name "$($action.Name): '$($supplied.Name)' is qualified with its body parameter" `
+            -Condition (-not $isBare) `
+            -Detail "Use '<bodyParameter>/$($supplied.Name)'. A bare name binds to nothing and the action renders empty."
+    }
+}
+
+
+# There are two similarly named connectors, backed by DIFFERENT OAuth client applications:
+#
+#   shared_webcontents    "HTTP with Microsoft Entra ID (preauthorized)"  client 7ab7862c...
+#                         Microsoft's first-party "App Service" app. VNet supported.
+#   shared_webcontentsv2  "HTTP With Microsoft Entra ID"                  client d2ebd3a9...
+#                         NOT on the VNet supported-services list.
+#
+# The repository originally preauthorized, granted and allow-listed d2ebd3a9 while the solution
+# used shared_webcontents. Creating the connection then failed with "Create and authorize OAuth
+# connection failed", because the connector authenticates as 7ab7862c, which had no consent and
+# no service principal. Assert the pairing so the two cannot drift apart again.
+
+$connectorClientIds = @{
+    'shared_webcontents'   = '7ab7862c-4c57-491e-8a45-d52a7e023983'
+    'shared_webcontentsv2' = 'd2ebd3a9-1ada-4480-8b2d-eac162716601'
+}
+
+$customizationsText = Get-FileText 'powerplatform/solution/src/Other/Customizations.xml'
+
+$usesV2 = $customizationsText -match 'apis/shared_webcontentsv2'
+$usesV1 = $customizationsText -match 'apis/shared_webcontents(?!v2)'
+
+Assert-True -Name 'The solution uses the VNet-supported HTTP connector (shared_webcontents)' `
+    -Condition ($usesV1 -and -not $usesV2) `
+    -Detail 'shared_webcontentsv2 is not on the Power Platform VNet supported-services list.'
+
+$connectorAppId = $connectorClientIds['shared_webcontents']
 
 foreach ($file in @('infra/main.bicep', 'scripts/Initialize-EntraResources.ps1', 'docs/identity-model.md')) {
     Assert-True -Name "Connector application ID present in $file" `
         -Condition ((Get-FileText $file) -match $connectorAppId)
+
+    # Match an ASSIGNMENT of the v2 client ID, not a mention of it. The files deliberately name
+    # the wrong value in a comment so the trap stays documented.
+    Assert-True -Name "$file does not assign the v2 connector's client ID" `
+        -Condition ((Get-FileText $file) -notmatch ("=\s*'" + [regex]::Escape($connectorClientIds['shared_webcontentsv2']) + "'")) `
+        -Detail 'That app backs shared_webcontentsv2, which this solution does not use.'
 }
 
 # ---------------------------------------------------------------------------------------------

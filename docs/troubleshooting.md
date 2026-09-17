@@ -18,10 +18,10 @@ The delegated permission grant is missing or incomplete. Microsoft's connector d
 
 ```powershell
 # Confirm the connector service principal exists
-az ad sp show --id d2ebd3a9-1ada-4480-8b2d-eac162716601 --query id -o tsv
+az ad sp show --id 7ab7862c-4c57-491e-8a45-d52a7e023983 --query id -o tsv
 
 # Confirm the grant exists against your API
-$connector = az ad sp show --id d2ebd3a9-1ada-4480-8b2d-eac162716601 --query id -o tsv
+$connector = az ad sp show --id 7ab7862c-4c57-491e-8a45-d52a7e023983 --query id -o tsv
 $api = az ad sp show --id <AZURE_API_APP_ID> --query id -o tsv
 az rest --method get --uri "https://graph.microsoft.com/v1.0/oauth2PermissionGrants?`$filter=clientId eq '$connector' and resourceId eq '$api'"
 ```
@@ -36,7 +36,7 @@ az resource show --ids "<function-app-id>/config/authsettingsV2" --api-version 2
   --query "properties.identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy.allowedApplications"
 ```
 
-It must contain `d2ebd3a9-1ada-4480-8b2d-eac162716601`.
+It must contain `7ab7862c-4c57-491e-8a45-d52a7e023983`.
 
 ### Timing note
 > Removing or adding preauthorizations can take up to 1 hour to reflect for connections existing prior to the update. However, new connections should reflect the updated authorizations instantly.

@@ -173,14 +173,14 @@
               "apiId": "/providers/Microsoft.PowerApps/apis/shared_webcontents"
             },
             "parameters": {
-              "method": "POST",
-              "url": "@{parameters('srcls_FunctionBaseUrl (srcls_FunctionBaseUrl)')}@{parameters('srcls_FunctionClassifyPath (srcls_FunctionClassifyPath)')}",
-              "headers": {
+              "request/method": "POST",
+              "request/url": "@{parameters('srcls_FunctionBaseUrl (srcls_FunctionBaseUrl)')}@{parameters('srcls_FunctionClassifyPath (srcls_FunctionClassifyPath)')}",
+              "request/headers": {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "x-correlation-id": "@variables('correlationId')"
               },
-              "body": "@{string(outputs('Compose_request_payload'))}"
+              "request/body": "@{string(outputs('Compose_request_payload'))}"
             },
             "authentication": "@parameters('$authentication')"
           }

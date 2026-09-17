@@ -52,7 +52,7 @@ public sealed class HealthFunctionTests
         var payload = new
         {
             auth_typ = "aad",
-            claims = new[] { new { typ = "azp", val = "d2ebd3a9-1ada-4480-8b2d-eac162716601" } },
+            claims = new[] { new { typ = "azp", val = "7ab7862c-4c57-491e-8a45-d52a7e023983" } },
         };
 
         var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload)));
@@ -62,7 +62,7 @@ public sealed class HealthFunctionTests
         var response = Assert.IsType<HealthResponse>(Assert.IsType<OkObjectResult>(result).Value);
 
         Assert.True(response.Authenticated);
-        Assert.Equal("d2ebd3a9-1ada-4480-8b2d-eac162716601", response.CallerAppId);
+        Assert.Equal("7ab7862c-4c57-491e-8a45-d52a7e023983", response.CallerAppId);
     }
 
     [Fact]

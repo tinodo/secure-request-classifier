@@ -69,11 +69,23 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Microsoft publishes this application ID in
-# microsoft/PowerApps-Samples/powershell/connectors/HTTPWithMicrosoftEntraId/ManagePermissionGrant.ps1
-# as $HttpWithAADAppAppId. It is the app behind the "HTTP with Microsoft Entra ID
-# (preauthorized)" connector.
-$script:HttpWithEntraIdConnectorAppId = 'd2ebd3a9-1ada-4480-8b2d-eac162716601'
+# OAuth client application ID of the "HTTP with Microsoft Entra ID (preauthorized)" connector
+# (shared_webcontents). This is Microsoft's first-party "App Service" application, which is what
+# "preauthorized" in the connector's name refers to: App Service Authentication already trusts it.
+#
+# Do NOT use d2ebd3a9-1ada-4480-8b2d-eac162716601. That value appears in Microsoft's
+# PowerApps-Samples ManagePermissionGrant.ps1 and was used here originally, but it belongs to
+# shared_webcontentsv2 ("HTTP With Microsoft Entra ID"), a DIFFERENT connector that is not on the
+# virtual network supported-services list. Using it produced "Create and authorize OAuth
+# connection failed" when creating the connection, because the connector actually authenticates
+# as the app below and that app was neither preauthorized nor granted the API scope.
+#
+# Verified live against the environment rather than taken from documentation:
+#   GET /providers/Microsoft.PowerApps/apis/shared_webcontents?$filter=environment eq '<env>'
+#     -> properties.connectionParameters.token.oAuthSettings.clientId
+#        = 7ab7862c-4c57-491e-8a45-d52a7e023983   ("HTTP with Microsoft Entra ID (preauthorized)")
+#   GET .../apis/shared_webcontentsv2 -> d2ebd3a9-1ada-4480-8b2d-eac162716601
+$script:HttpWithEntraIdConnectorAppId = '7ab7862c-4c57-491e-8a45-d52a7e023983'
 
 $script:GraphBase = 'https://graph.microsoft.com/v1.0'
 
@@ -478,37 +490,58 @@ if (-not $account) {
 $originalSubscriptionId = $account.id
 $originalTenantId = $account.tenantId
 
-az account set --subscription $SubscriptionId
-$tenantId = (az account show --query tenantId --output tsv)
-Write-Host "    tenant       $tenantId"
-Write-Host "    subscription $SubscriptionId"
-
-# Everything below writes to Microsoft Entra ID, and `az ad` always targets the tenant of the
-# ACTIVE subscription. If that is not the tenant the app registrations live in, this script does
-# not fail - it cheerfully creates a second, duplicate set in the wrong tenant.
+# Decide BEFORE switching. Everything below writes to Microsoft Entra ID, and `az ad` targets the
+# tenant of the ACTIVE subscription - so merely running `az account set` against a subscription in
+# another tenant points every later Graph call at that directory. This script must never put the
+# CLI into a tenant it is not going to work in, not even briefly.
 #
-# That is not hypothetical. Some subscriptions report a tenantId that is not the one you signed
-# in against, and switching to such a subscription silently moves every Graph call to a different
-# directory. Refuse rather than guess.
-if ($tenantId -ne $originalTenantId) {
-    az account set --subscription $originalSubscriptionId
+# The tenant that matters is the one the CLI will authenticate against, which is the tenantId on
+# the subscription as `az account list` records it. That is NOT always what ARM reports for the
+# same subscription: subscription 6d47a6cb is recorded by ARM under 971d7970, while the CLI
+# operates in 72f988bf, the credential's home tenant. Graph follows the CLI. Reading ARM instead
+# sent this script into the wrong directory, where it tried to create the deployment app and was
+# stopped only by an unrelated policy there - not by anything here.
+$targetTenantId = az account list `
+    --query "[?id=='$SubscriptionId'].tenantId | [0]" --output tsv 2>$null
 
+if ([string]::IsNullOrWhiteSpace($targetTenantId)) {
     throw @"
-Refusing to continue.
+Subscription $SubscriptionId is not in this sign-in's subscription list, so the tenant the Azure
+CLI would use for it cannot be determined. Run 'az login --tenant <tenant>' for the tenant that
+owns it, then re-run.
+"@
+}
+
+if ($targetTenantId -ne $originalTenantId) {
+    throw @"
+Refusing to continue. The active subscription has NOT been changed.
 
 You signed in against tenant
     $originalTenantId
-but subscription $SubscriptionId reports tenant
-    $tenantId
+but selecting subscription $SubscriptionId would put the Azure CLI into tenant
+    $targetTenantId
 
-Every app registration this script creates would land in the second tenant, which is probably
-not where your existing ones are. Sign in to the intended tenant explicitly first:
+Every app registration, service principal and permission grant this script creates would land in
+that second tenant. Switching is not harmless: it silently redirects Microsoft Graph, so the
+check runs here, before `az account set`, rather than after it.
 
-    az login --tenant $originalTenantId
+Pass a subscription in $originalTenantId, or sign in to the other tenant deliberately:
 
-then re-run. The active subscription has been restored to $originalSubscriptionId.
+    az login --tenant $targetTenantId
 "@
 }
+
+az account set --subscription $SubscriptionId
+$tenantId = (az account show --query tenantId --output tsv)
+
+# Belt and braces: confirm the switch landed where it was predicted to.
+if ($tenantId -ne $originalTenantId) {
+    az account set --subscription $originalSubscriptionId
+    throw "After selecting $SubscriptionId the CLI is in tenant $tenantId, not $originalTenantId. Restored $originalSubscriptionId and stopped."
+}
+
+Write-Host "    tenant       $tenantId"
+Write-Host "    subscription $SubscriptionId"
 
 # ---------------------------------------------------------------------------------------------
 
