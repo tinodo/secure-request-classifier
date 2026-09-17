@@ -189,19 +189,62 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: No workflow may reference a GitHub secret
+      - name: No workflow may reference a stored credential
         shell: bash
         run: |
           set -euo pipefail
-          # The demo's central claim is that no Azure or Power Platform credential is stored in
-          # GitHub. GITHUB_TOKEN is issued per-run by GitHub itself and is not a stored
-          # credential, so it is the only permitted reference.
-          if grep -rnoE 'secrets\.[A-Za-z_][A-Za-z0-9_]*' .github/workflows \
-               | grep -v 'secrets\.GITHUB_TOKEN'; then
-            echo "::error::A workflow references a stored GitHub secret. This demo must authenticate only with OIDC / workload identity federation."
-            exit 1
-          fi
-          echo "No stored secrets are referenced by any workflow."
+          # The demo's central claim is that no Azure or Power Platform CREDENTIAL is stored in
+          # GitHub: authentication is entirely OIDC / workload identity federation.
+          #
+          # Tenant-specific IDENTIFIERS (client id, tenant id, subscription id, environment URL)
+          # ARE stored, as GitHub *secrets* rather than variables. That is deliberate: this
+          # repository is public, and GitHub masks secrets in run logs and step summaries but
+          # does not mask variables. None of these grants access on its own.
+          #
+          # This gate therefore allow-lists exactly those identifiers and fails on anything else,
+          # in particular on anything whose name suggests real credential material.
+          ALLOWED='GITHUB_TOKEN
+          AZURE_CLIENT_ID
+          AZURE_TENANT_ID
+          AZURE_SUBSCRIPTION_ID
+          AZURE_API_APP_ID
+          AZURE_API_APP_ID_URI
+          POWER_PLATFORM_APP_ID
+          POWER_PLATFORM_TENANT_ID
+          POWER_PLATFORM_ENVIRONMENT_ID
+          POWER_PLATFORM_ENVIRONMENT_URL
+          POWER_PLATFORM_ADMIN_OBJECT_ID
+          POWER_PLATFORM_SECURITY_GROUP_ID
+          POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS
+          POWER_PLATFORM_CONNECTION_ID_OFFICE365'
+          ALLOWED=$(echo "$ALLOWED" | sed 's/^[[:space:]]*//')
+
+          referenced=$(grep -rhoE 'secrets\.[A-Za-z_][A-Za-z0-9_]*' .github/workflows \
+                        | sed 's/^secrets\.//' | sort -u || true)
+
+          fail=0
+          for name in $referenced; do
+            if ! echo "$ALLOWED" | grep -qx "$name"; then
+              echo "::error::Workflow references secrets.$name, which is not an allow-listed non-credential identifier. Add it to the allow-list only if it is genuinely not a credential."
+              fail=1
+            fi
+
+            # Defence in depth: never accept a name that looks like credential material,
+            # even if someone adds it to the allow-list above.
+            case "$name" in
+              GITHUB_TOKEN) ;;
+              *SECRET*|*PASSWORD*|*PWD*|*KEY*|*CREDENTIAL*|*TOKEN*|*PAT|*SAS*)
+                echo "::error::secrets.$name is named like credential material. This demo must authenticate only with OIDC / workload identity federation."
+                fail=1
+                ;;
+            esac
+          done
+
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+
+          echo "No stored credential is referenced by any workflow."
+          echo "Non-credential identifiers referenced:"
+          echo "$referenced" | sed 's/^/  /'
 
       - name: Bicep must not disable the security posture
         shell: bash

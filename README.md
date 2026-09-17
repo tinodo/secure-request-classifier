@@ -13,7 +13,7 @@ Everything is in this repository: the Azure infrastructure, the application code
 | A Power App and cloud flow can reach a backend that has **no public endpoint** | The Function App ships with `publicNetworkAccess: Disabled`; the flow reaches it through the Power Platform delegated subnet and a private endpoint |
 | Power Platform traffic can be pinned into **your** virtual network | A `Microsoft.PowerPlatform/enterprisePolicies` network-injection policy binds delegated subnets in both Azure regions of the Power Platform region pair |
 | Backend authentication needs **no shared secret** | App Service Authentication validates Microsoft Entra ID tokens; no client secret, no Function key, no SAS token |
-| Azure access needs **no stored credential** | GitHub OIDC / workload identity federation for both Azure **and** Power Platform. A CI job fails the build if any workflow references a stored secret |
+| Azure access needs **no stored credential** | GitHub OIDC / workload identity federation for both Azure **and** Power Platform. A CI job fails the build if any workflow references a stored credential; only non-credential identifiers are allow-listed |
 | The whole thing is **source controlled** | Infrastructure (Bicep), application (.NET 10), Power Platform solution (unpacked), pipelines (Actions), docs |
 | It coexists with enterprise governance | No hub networking, no shared DNS zones, no pre-existing resources; Azure Landing Zone coexistence switches are parameters |
 
@@ -161,7 +161,7 @@ sequenceDiagram
     GH->>DV: Import the Power Platform solution
 
     rect rgba(220, 255, 220, 0.5)
-        Note over GH,DV: Nothing in GitHub stores an Azure or Power Platform credential.<br/>Only identifiers are stored, as repository variables.
+        Note over GH,DV: Nothing in GitHub stores an Azure or Power Platform credential.<br/>Only identifiers are stored, as repository secrets so they<br/>are masked in the public run logs.
     end
 ```
 
@@ -252,7 +252,7 @@ sequenceDiagram
 * [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) 2.60+
 * [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
 * [Power Platform CLI](https://learn.microsoft.com/power-platform/developer/cli/introduction) (`pac`) 2.7+
-* [GitHub CLI](https://cli.github.com/) (optional, for setting repository variables quickly)
+* [GitHub CLI](https://cli.github.com/) (optional, for setting repository secrets quickly)
 
 Local .NET, Bicep and Node tooling are **not** required — GitHub Actions does the building.
 
@@ -271,13 +271,15 @@ pwsh ./scripts/Initialize-EntraResources.ps1 `
     -SubscriptionId   <subscription-guid>
 ```
 
-This creates the deployment app registration with a **federated credential** (no client secret), the API app registration, the delegated permission grant for the connector, and the least-privilege Azure role assignments. It prints the repository variables to set and the exact `gh variable set` commands.
+This creates the deployment app registration with a **federated credential** (no client secret), the API app registration, the delegated permission grant for the connector, and the least-privilege Azure role assignments. It prints the repository secrets to set and the exact `gh secret set` commands.
 
-### 2. Set repository variables
+### 2. Set repository secrets and variables
 
-All of these are **variables**, not secrets, because none of them is a credential:
+None of the values below is a credential — they are identifiers, and nothing here grants access on its own. The tenant-specific ones are still stored as **secrets** rather than variables, for one practical reason: **GitHub masks secrets in run logs and step summaries, and does not mask variables.** This repository is public, so anything held in a variable would be printed in the clear on the first successful deployment.
 
-| Variable | Required | Example |
+Settings → Secrets and variables → Actions → *Secrets*:
+
+| Secret | Required | Example |
 | --- | --- | --- |
 | `AZURE_CLIENT_ID` | yes | `11111111-…` |
 | `AZURE_TENANT_ID` | yes | `22222222-…` |
@@ -286,13 +288,20 @@ All of these are **variables**, not secrets, because none of them is a credentia
 | `AZURE_API_APP_ID_URI` | yes | `api://44444444-…` |
 | `POWER_PLATFORM_APP_ID` | for solution import | same as `AZURE_CLIENT_ID` |
 | `POWER_PLATFORM_TENANT_ID` | for solution import | same as `AZURE_TENANT_ID` |
-| `POWER_PLATFORM_ENVIRONMENT_URL` | for solution import | `https://contoso.crm4.dynamics.com` |
-| `POWER_PLATFORM_ENVIRONMENT_ID` | for policy linking | `55555555-…` |
-| `POWER_PLATFORM_REGION` | recommended | `europe` |
 | `POWER_PLATFORM_ADMIN_OBJECT_ID` | recommended | object id that will link the policy |
+| `POWER_PLATFORM_ENVIRONMENT_URL` | only if you skip provisioning | `https://contoso.crm4.dynamics.com` |
+| `POWER_PLATFORM_ENVIRONMENT_ID` | only if you skip provisioning | `55555555-…` |
+| `POWER_PLATFORM_CONNECTION_ID_*` | optional | see [docs/limitations.md](docs/limitations.md) |
+
+Settings → Secrets and variables → Actions → *Variables* (non-sensitive configuration):
+
+| Variable | Required | Example |
+| --- | --- | --- |
+| `POWER_PLATFORM_REGION` | recommended | `europe` |
 | `AZURE_LOCATION` | optional | `westeurope` |
 | `FUNCTION_DEPLOY_MODE` | optional | `deployment-window` (default) or `private-runner` |
-| `POWER_PLATFORM_CONNECTION_ID_*` | optional | see [docs/limitations.md](docs/limitations.md) |
+
+`POWER_PLATFORM_ENVIRONMENT_ID` and `POWER_PLATFORM_ENVIRONMENT_URL` are normally **not** set by hand. The Deploy workflow provisions the environment and passes both to the later jobs as job outputs. Set them yourself only when you run Deploy with `provision-power-platform-environment` unticked.
 
 The full table, including the Azure Landing Zone switches, is in [docs/deployment.md](docs/deployment.md#configuration-reference).
 
@@ -403,7 +412,7 @@ Manual checks, including `nslookup` from the delegated subnet using Microsoft's 
 
 ## Configuration
 
-Behaviour is controlled by Bicep parameters (see `infra/parameters/demo.bicepparam`) and GitHub repository variables. Nothing in this repository is tied to a particular tenant, subscription or environment; the defaults are generic and safe.
+Behaviour is controlled by Bicep parameters (see `infra/parameters/demo.bicepparam`) and GitHub repository secrets and variables. Nothing in this repository is tied to a particular tenant, subscription or environment; the defaults are generic and safe.
 
 The full reference is in [docs/deployment.md](docs/deployment.md#configuration-reference).
 

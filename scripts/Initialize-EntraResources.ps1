@@ -61,7 +61,9 @@ param(
 
     [string] $ApiScopeName = 'user_impersonation',
 
-    [switch] $SkipRoleAssignments
+    [switch] $SkipRoleAssignments,
+
+    [switch] $SkipPowerPlatformAdminRole
 )
 
 Set-StrictMode -Version Latest
@@ -80,6 +82,11 @@ $script:Roles = @{
     Contributor                          = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
     RoleBasedAccessControlAdministrator  = 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
 }
+
+# Microsoft Entra ID directory role template for Power Platform Administrator. The deployment
+# identity needs it to link the network-injection enterprise policy to the environment.
+# https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/permissions-reference
+$script:PowerPlatformAdministratorRoleTemplateId = '11648597-926c-4cf3-9c36-bcebb0ba8dcc'
 
 function Write-Step {
     param([string] $Message)
@@ -368,6 +375,40 @@ function Set-AzureRoleAssignment {
     Write-Host "    assigned role '$RoleLabel'" -ForegroundColor Green
 }
 
+function Set-DirectoryRoleMember {
+    param(
+        [Parameter(Mandatory)][string] $RoleTemplateId,
+        [Parameter(Mandatory)][string] $PrincipalObjectId,
+        [Parameter(Mandatory)][string] $RoleLabel
+    )
+
+    # A directory role only exists once it has been activated from its template in the tenant.
+    $roles = Invoke-Graph -Method GET -Uri "$script:GraphBase/directoryRoles?`$filter=roleTemplateId eq '$RoleTemplateId'"
+    $role = $roles.value | Select-Object -First 1
+
+    if (-not $role) {
+        if (-not $PSCmdlet.ShouldProcess($RoleLabel, 'Activate directory role')) { return }
+
+        $role = Invoke-Graph -Method POST -Uri "$script:GraphBase/directoryRoles" -Body @{ roleTemplateId = $RoleTemplateId }
+        Write-Host "    activated directory role '$RoleLabel'"
+    }
+
+    $members = Invoke-Graph -Method GET -Uri "$script:GraphBase/directoryRoles/$($role.id)/members?`$select=id"
+
+    if ($members.value.id -contains $PrincipalObjectId) {
+        Write-Host "    directory role '$RoleLabel' already assigned"
+        return
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($PrincipalObjectId, "Assign directory role $RoleLabel")) { return }
+
+    Invoke-Graph -Method POST -Uri "$script:GraphBase/directoryRoles/$($role.id)/members/`$ref" -Body @{
+        '@odata.id' = "$script:GraphBase/directoryObjects/$PrincipalObjectId"
+    } | Out-Null
+
+    Write-Host "    assigned directory role '$RoleLabel'" -ForegroundColor Green
+}
+
 # ---------------------------------------------------------------------------------------------
 
 Write-Step 'Checking Azure CLI sign-in'
@@ -463,9 +504,24 @@ else {
 
 # ---------------------------------------------------------------------------------------------
 
-Write-Step 'Done. Configure these as GitHub repository VARIABLES (Settings > Secrets and variables > Actions > Variables)'
+if (-not $SkipPowerPlatformAdminRole) {
+    Write-Step 'Granting the deployment identity the Power Platform Administrator role'
 
-$variables = [ordered]@{
+    Set-DirectoryRoleMember -RoleTemplateId $script:PowerPlatformAdministratorRoleTemplateId `
+        -PrincipalObjectId $deploymentSp.id -RoleLabel 'Power Platform Administrator'
+}
+else {
+    Write-Step 'Skipping the Power Platform Administrator role (-SkipPowerPlatformAdminRole)'
+}
+
+# ---------------------------------------------------------------------------------------------
+
+Write-Step 'Done. Configure these as GitHub repository SECRETS (Settings > Secrets and variables > Actions > Secrets)'
+
+# These are tenant-specific identifiers. None of them is a credential, but they are configured as
+# SECRETS rather than variables because GitHub masks secrets in run logs and step summaries and
+# does NOT mask variables — and this repository is intended to be public.
+$secrets = [ordered]@{
     AZURE_CLIENT_ID          = $deploymentApp.appId
     AZURE_TENANT_ID          = $tenantId
     AZURE_SUBSCRIPTION_ID    = $SubscriptionId
@@ -476,26 +532,25 @@ $variables = [ordered]@{
 }
 
 Write-Host ''
-foreach ($key in $variables.Keys) {
-    Write-Host ('  {0,-26} {1}' -f $key, $variables[$key]) -ForegroundColor Green
+foreach ($key in $secrets.Keys) {
+    Write-Host ('  {0,-26} {1}' -f $key, $secrets[$key]) -ForegroundColor Green
 }
 
 Write-Host ''
 Write-Host '  Set them in one command with the GitHub CLI:' -ForegroundColor Cyan
 Write-Host ''
-foreach ($key in $variables.Keys) {
-    Write-Host "    gh variable set $key --repo $GitHubRepository --body `"$($variables[$key])`""
+foreach ($key in $secrets.Keys) {
+    Write-Host "    gh secret set $key --repo $GitHubRepository --body `"$($secrets[$key])`""
 }
 
 Write-Host ''
 Write-Host '  No client secret was created. Nothing produced by this script is a credential.' -ForegroundColor Yellow
 Write-Host ''
-Write-Host '  Remaining bootstrap steps (see docs/deployment.md):' -ForegroundColor Cyan
-Write-Host "    1. Grant the deployment app the Power Platform Administrator role in Microsoft Entra ID."
-Write-Host "    2. Add it as a Dataverse application user:"
-Write-Host "         pac admin assign-user --environment <envId> --user $($deploymentApp.appId) --role 'System administrator' --application-user"
-Write-Host "    3. Enable Managed Environments on the target environment:"
-Write-Host "         pac admin set-governance-config --environment <envId> --protection-level Standard"
+Write-Host '  Next: create the Power Platform environment (see docs/deployment.md):' -ForegroundColor Cyan
+Write-Host "    ./scripts/New-PowerPlatformEnvironment.ps1 -DisplayName <name> -Location <geography> -DeploymentAppId $($deploymentApp.appId)"
+Write-Host ''
+Write-Host '  That script creates the environment, enables Managed Environments and adds this'
+Write-Host '  identity as a Dataverse application user. Nothing else is done by hand.'
 
 $summary = [ordered]@{
     tenantId                  = $tenantId

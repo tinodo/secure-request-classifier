@@ -301,7 +301,7 @@ Then the CI job that enforces it. Actions → **CI** → `security-invariants`:
 
 | Check | Enforces |
 | --- | --- |
-| No workflow references a stored secret | fails the build on `${{ secrets.* }}` other than `GITHUB_TOKEN` |
+| No workflow references a stored credential | fails the build on any `${{ secrets.* }}` that is not an allow-listed non-credential identifier, and on any secret named like credential material |
 | Storage shared key access stays disabled | fails on `allowSharedKeyAccess: true` |
 | Easy Auth never references a client secret | fails on a `clientSecretSettingName` assignment |
 | Defaults ship with public access disabled | fails if `demo.bicepparam` is weakened |

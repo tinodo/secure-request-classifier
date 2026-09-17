@@ -1,6 +1,6 @@
 # Deployment guide
 
-Complete, ordered instructions. Steps 1–4 happen once; step 5 is repeatable.
+Complete, ordered instructions. Steps 1–5 happen once; step 6 is repeatable.
 
 ---
 
@@ -54,20 +54,65 @@ This creates, idempotently:
 | Delegated permission grant | `AllPrincipals` consent so users are not prompted when creating the connection |
 | Pre-authorized application | The connector added to the API's `preAuthorizedApplications` |
 | Azure role assignments | `Contributor` and `Role Based Access Control Administrator` at subscription scope |
+| Power Platform Administrator | The directory role the deployment identity needs to link the enterprise policy. Skip with `-SkipPowerPlatformAdminRole` |
 
 Run it with `-WhatIf` first if you want to see exactly what it will do, or `-SkipRoleAssignments` if a different team owns RBAC.
 
-It ends by printing the repository variables to set, including ready-to-paste `gh variable set` commands.
+It ends by printing the repository secrets to set, including ready-to-paste `gh secret set` commands.
 
 ---
 
-## 3. Set repository variables
+## 3. Create the Power Platform environment (once)
 
-Everything is a **variable**, not a secret. Settings → Secrets and variables → Actions → *Variables*.
+A Power Platform environment is not an ARM resource, so Bicep cannot create it — it lives on
+the Business Application Platform control plane. It is still scripted, not clicked:
 
-### Required
+```powershell
+pwsh ./scripts/New-PowerPlatformEnvironment.ps1 `
+    -DisplayName     srclass-demo `
+    -Location        europe `
+    -DeploymentAppId <AZURE_CLIENT_ID printed by step 2>
+```
 
-| Variable | Source |
+This creates, idempotently:
+
+| Step | Note |
+| --- | --- |
+| The environment | Sandbox SKU with a Dataverse database. Override with `-EnvironmentSku`, `-CurrencyCode`, `-LanguageCode`, `-DomainName`, `-SecurityGroupId` |
+| Managed Environments | `protectionLevel = Standard`. A hard prerequisite of VNet support |
+| Dataverse application user | The deployment identity, holding the **System Administrator** security role, so the workflow can import the solution |
+
+**It will not touch an environment it did not create.** If an environment with the same display
+name already exists the script reports it and changes nothing; pass `-AdoptExisting` to
+deliberately configure a pre-existing environment.
+
+Trial environments and Dataverse for Teams do not support VNet support — use Sandbox,
+Production or Developer.
+
+It ends by printing `POWER_PLATFORM_ENVIRONMENT_ID` and `POWER_PLATFORM_ENVIRONMENT_URL`. You only
+need to store them if you intend to skip the provisioning stage on later runs — the Deploy
+workflow otherwise resolves the environment itself and hands both values to the later jobs as
+job outputs.
+
+---
+
+## 4. Set repository secrets and variables
+
+None of the values below is a credential — they are identifiers, and none grants access on its
+own. The tenant-specific ones are nevertheless stored as **secrets**, for one practical reason:
+**GitHub masks secrets in run logs and step summaries, and does not mask variables.** This
+repository is public, so anything held in a variable is printed in the clear the first time a
+deployment succeeds. Only genuinely non-sensitive configuration stays a variable.
+
+The CI `security-invariants` job enforces this split: it allow-lists exactly these identifier
+secrets and fails the build on any other `secrets.*` reference, or on any name that looks like
+credential material.
+
+### Required secrets
+
+Settings → Secrets and variables → Actions → *Secrets*.
+
+| Secret | Source |
 | --- | --- |
 | `AZURE_CLIENT_ID` | printed by the bootstrap script |
 | `AZURE_TENANT_ID` | printed by the bootstrap script |
@@ -75,36 +120,51 @@ Everything is a **variable**, not a secret. Settings → Secrets and variables �
 | `AZURE_API_APP_ID` | printed by the bootstrap script |
 | `AZURE_API_APP_ID_URI` | printed by the bootstrap script |
 
-### Required for the Power Platform stages
+### Required secrets for the Power Platform stages
 
-| Variable | Example |
+| Secret | Example |
 | --- | --- |
 | `POWER_PLATFORM_APP_ID` | same value as `AZURE_CLIENT_ID` |
 | `POWER_PLATFORM_TENANT_ID` | same value as `AZURE_TENANT_ID` |
-| `POWER_PLATFORM_ENVIRONMENT_URL` | `https://contoso.crm4.dynamics.com` |
-| `POWER_PLATFORM_ENVIRONMENT_ID` | `55555555-5555-5555-5555-555555555555` |
-| `POWER_PLATFORM_REGION` | `europe` |
 | `POWER_PLATFORM_ADMIN_OBJECT_ID` | object id that will link the enterprise policy |
 
-### Optional
+### Optional secrets
+
+| Secret | Purpose |
+| --- | --- |
+| `POWER_PLATFORM_ENVIRONMENT_ID` | Only when you run Deploy with `provision-power-platform-environment` unticked. Normally the workflow provisions the environment and passes this to later jobs as a job output |
+| `POWER_PLATFORM_ENVIRONMENT_URL` | As above, for the solution import stage |
+| `POWER_PLATFORM_SECURITY_GROUP_ID` | Restrict environment access to a security group |
+| `POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS` | Connection ID for the connector (see step 5) |
+| `POWER_PLATFORM_CONNECTION_ID_OFFICE365` | Connection ID for Office 365 Outlook |
+
+### Optional variables
+
+Settings → Secrets and variables → Actions → *Variables*. These are not tenant-specific and are
+safe to expose in a public run log.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `POWER_PLATFORM_REGION` | `europe` | Power Platform geography |
+| `POWER_PLATFORM_ENVIRONMENT_NAME` | `srclass-demo` | Display name of the provisioned environment |
+| `POWER_PLATFORM_ENVIRONMENT_SKU` | `Sandbox` | Environment SKU |
 | `AZURE_LOCATION` | `westeurope` | Location for the subscription-scope deployment metadata |
 | `RESOURCE_GROUP_NAME` | `rg-srclass-demo` | Override the resource group name |
 | `DEPLOY_ENVIRONMENT` | `demo` | GitHub environment used by the deploy jobs |
 | `ENVIRONMENT_LABEL` | `Demo` | Shown in the confirmation email |
 | `FUNCTION_DEPLOY_MODE` | `deployment-window` | `private-runner` to never enable public access |
-| `FUNCTION_DEPLOY_RUNNER_LABEL` | `ubuntu-latest` | Runner label for `private-runner` mode |
-| `POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS` | — | Connection ID for the connector (see step 4) |
-| `POWER_PLATFORM_CONNECTION_ID_OFFICE365` | — | Connection ID for Office 365 Outlook |
+| `FUNCTION_DEPLOY_RUNNER_LABEL` | `ubuntu-latest` | Runner label for `private-runner` mode. **Do not point this at a self-hosted runner while the repository is public** |
 | `RUN_CONNECTIVITY_PROBE` | `false` | Set `true` to run the container-based private probe during verification |
 | `CREATE_PRIVATE_DNS_ZONES` | `true` | `false` in an ALZ that owns the zones |
 | `CREATE_PRIVATE_DNS_ZONE_GROUPS` | `true` | `false` when an ALZ DeployIfNotExists policy owns DNS integration |
 
 ---
 
-## 4. Power Platform prerequisites (once)
+## 5. Power Platform prerequisites (once)
+
+Managed Environments and the Dataverse application user are handled by
+`New-PowerPlatformEnvironment.ps1` in step 3. Nothing below needs doing by hand for a new
+environment — this section is only for an environment created outside that script.
 
 ```powershell
 pac auth create --deviceCode
@@ -120,8 +180,6 @@ pac admin assign-user `
     --application-user
 ```
 
-Then, in the Microsoft Entra admin center, assign the deployment app registration the **Power Platform Administrator** role. It needs this to link the enterprise policy.
-
 ### Create the connections
 
 The HTTP with Microsoft Entra ID connection must be created by a person once — see [limitations.md](limitations.md#2-the-connector-connection-must-be-created-once-by-a-person). You can do this before or after the first deployment; the Function App base URL is a deployment output, so after is usually easier.
@@ -131,15 +189,15 @@ Once both connections exist:
 ```powershell
 pac connection list --environment <environment-url>
 
-gh variable set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
-gh variable set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
+gh secret set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
+gh secret set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
 ```
 
 Then re-run the Deploy workflow so the solution import binds them.
 
 ---
 
-## 5. Deploy
+## 6. Deploy
 
 Actions → **Deploy** → *Run workflow*.
 
@@ -242,7 +300,7 @@ Microsoft's guidance when a DeployIfNotExists policy manages private DNS: *"You 
 | --- | --- |
 | `srcls_FunctionBaseUrl` | `functionAppBaseUrl` Bicep output |
 | `srcls_FunctionClassifyPath` | constant `/api/requests/classify` |
-| `srcls_FunctionApplicationIdUri` | `AZURE_API_APP_ID_URI` variable |
+| `srcls_FunctionApplicationIdUri` | `AZURE_API_APP_ID_URI` secret |
 | `srcls_EnvironmentLabel` | `ENVIRONMENT_LABEL` variable |
 
 ### The output-to-input contract

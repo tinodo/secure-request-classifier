@@ -208,8 +208,8 @@ The deployment settings file had no `ConnectionId` for one or both connection re
 
 ```powershell
 pac connection list --environment <environment-url>
-gh variable set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
-gh variable set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
+gh secret set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
+gh secret set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
 ```
 
 Then re-run the Deploy workflow. See [limitations.md](limitations.md#2-the-connector-connection-must-be-created-once-by-a-person).

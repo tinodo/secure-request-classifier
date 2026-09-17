@@ -127,7 +127,7 @@ This is the part worth dwelling on with a customer. Each row is a credential tha
 
 `.github/workflows/ci.yml` → `security-invariants` fails the build on any of:
 
-* a workflow referencing `${{ secrets.* }}` other than `GITHUB_TOKEN`;
+* a workflow referencing `${{ secrets.* }}` that is not an allow-listed non-credential identifier, or any secret whose name looks like credential material;
 * `allowSharedKeyAccess: true` anywhere in `infra/`;
 * a `clientSecretSettingName:` assignment;
 * `demo.bicepparam` no longer shipping `publicNetworkAccess = 'Disabled'`;

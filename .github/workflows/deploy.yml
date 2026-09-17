@@ -24,6 +24,10 @@ on:
         description: Import the Power Platform solution
         type: boolean
         default: true
+      provision-power-platform-environment:
+        description: Create the Power Platform environment if it does not exist
+        type: boolean
+        default: true
       link-enterprise-policy:
         description: Link the Power Platform environment to the virtual network enterprise policy
         type: boolean
@@ -133,6 +137,101 @@ jobs:
           include-hidden-files: true
 
   # -------------------------------------------------------------------------------------------
+  # The environment id and url are secrets, and the `secrets` context is NOT available in a
+  # job-level `if:`. This job reduces them to non-sensitive booleans the gates can read, so that
+  # skipping provisioning and falling back to a pre-set environment still works.
+  resolve:
+    name: Resolve optional configuration
+    runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    outputs:
+      has-environment-id: ${{ steps.check.outputs.has-environment-id }}
+      has-environment-url: ${{ steps.check.outputs.has-environment-url }}
+    steps:
+      - name: Check which optional secrets are set
+        id: check
+        env:
+          ENVIRONMENT_ID: ${{ secrets.POWER_PLATFORM_ENVIRONMENT_ID }}
+          ENVIRONMENT_URL: ${{ secrets.POWER_PLATFORM_ENVIRONMENT_URL }}
+        run: |
+          set -euo pipefail
+          [ -n "$ENVIRONMENT_ID" ]  && echo "has-environment-id=true"   >> "$GITHUB_OUTPUT" || echo "has-environment-id=false"   >> "$GITHUB_OUTPUT"
+          [ -n "$ENVIRONMENT_URL" ] && echo "has-environment-url=true"  >> "$GITHUB_OUTPUT" || echo "has-environment-url=false"  >> "$GITHUB_OUTPUT"
+
+  # -------------------------------------------------------------------------------------------
+  power-platform-environment:
+    name: Provision Power Platform environment
+    needs: validate
+    if: ${{ inputs.provision-power-platform-environment != false }}
+    runs-on: ubuntu-latest
+    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    outputs:
+      environment-id: ${{ steps.provision.outputs.environmentId }}
+      environment-url: ${{ steps.provision.outputs.instanceUrl }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create or adopt the environment
+        id: provision
+        shell: pwsh
+        # Secrets are passed through env rather than interpolated into the script body, so they
+        # are never rendered into the log and cannot break out of the surrounding quotes.
+        env:
+          DISPLAY_NAME: ${{ vars.POWER_PLATFORM_ENVIRONMENT_NAME || 'srclass-demo' }}
+          LOCATION: ${{ vars.POWER_PLATFORM_REGION || 'europe' }}
+          ENVIRONMENT_SKU: ${{ vars.POWER_PLATFORM_ENVIRONMENT_SKU }}
+          DEPLOYMENT_APP_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          SECURITY_GROUP_ID: ${{ secrets.POWER_PLATFORM_SECURITY_GROUP_ID }}
+        run: |
+          $parameters = @{
+            DisplayName     = $env:DISPLAY_NAME
+            Location        = $env:LOCATION
+            DeploymentAppId = $env:DEPLOYMENT_APP_ID
+            AdoptExisting   = $true
+            Confirm         = $false
+          }
+          if ($env:ENVIRONMENT_SKU) {
+            $parameters.EnvironmentSku = $env:ENVIRONMENT_SKU
+          }
+          if ($env:SECURITY_GROUP_ID) {
+            $parameters.SecurityGroupId = $env:SECURITY_GROUP_ID
+          }
+
+          $result = ./scripts/New-PowerPlatformEnvironment.ps1 @parameters
+
+          "environmentId=$($result.environmentId)" >> $env:GITHUB_OUTPUT
+          "instanceUrl=$($result.instanceUrl)"     >> $env:GITHUB_OUTPUT
+
+      # The environment id and url are deliberately NOT written back to the repository. Writing
+      # them to repository variables leaked them into public run logs, and GITHUB_TOKEN cannot
+      # write variables or secrets anyway. Provisioning adopts the existing environment by
+      # display name on every run, so nothing needs to persist between runs. Only when you skip
+      # provisioning do you set the POWER_PLATFORM_ENVIRONMENT_ID / _URL secrets yourself.
+
+      - name: Summarise
+        run: |
+          {
+            echo "## Power Platform environment"
+            echo
+            echo "Environment provisioned and ready."
+            echo
+            echo "The environment ID and URL are treated as secrets and are deliberately not"
+            echo "written to this summary, because step summaries are public on a public"
+            echo "repository. Read them from the environment itself in the Power Platform"
+            echo "admin center."
+            echo
+            echo "Managed Environments is enabled and the deployment identity is a Dataverse"
+            echo "application user holding System Administrator."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------------------------
   infrastructure:
     name: Deploy Azure infrastructure
     needs: validate
@@ -151,9 +250,9 @@ jobs:
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Register required resource providers
         run: |
@@ -171,6 +270,11 @@ jobs:
       - name: Deploy infrastructure
         id: deploy
         shell: bash
+        # Secrets are read from env, never interpolated into the script body, so they are not
+        # rendered into the public run log as part of the executed command.
+        env:
+          API_APP_ID: ${{ secrets.AZURE_API_APP_ID }}
+          ADMIN_OBJECT_ID: ${{ secrets.POWER_PLATFORM_ADMIN_OBJECT_ID }}
         run: |
           set -euo pipefail
 
@@ -178,7 +282,7 @@ jobs:
           DEPLOYMENT_NAME="srclass-$(date +%Y%m%d%H%M%S)"
 
           EXTRA_PARAMS=()
-          [ -n "${{ vars.AZURE_API_APP_ID }}" ] && EXTRA_PARAMS+=("apiApplicationId=${{ vars.AZURE_API_APP_ID }}")
+          [ -n "$API_APP_ID" ] && EXTRA_PARAMS+=("apiApplicationId=$API_APP_ID")
           [ -n "${{ vars.POWER_PLATFORM_REGION }}" ] && EXTRA_PARAMS+=("powerPlatformRegion=${{ vars.POWER_PLATFORM_REGION }}")
           [ -n "${{ vars.RESOURCE_GROUP_NAME }}" ] && EXTRA_PARAMS+=("resourceGroupName=${{ vars.RESOURCE_GROUP_NAME }}")
           [ -n "${{ vars.CREATE_PRIVATE_DNS_ZONES }}" ] && EXTRA_PARAMS+=("createPrivateDnsZones=${{ vars.CREATE_PRIVATE_DNS_ZONES }}")
@@ -187,13 +291,13 @@ jobs:
           # The Power Platform administrator identity needs Reader on the enterprise policy in
           # order to link it to an environment.
           READER_IDS="[]"
-          if [ -n "${{ vars.POWER_PLATFORM_ADMIN_OBJECT_ID }}" ]; then
-            READER_IDS="[\"${{ vars.POWER_PLATFORM_ADMIN_OBJECT_ID }}\"]"
+          if [ -n "$ADMIN_OBJECT_ID" ]; then
+            READER_IDS="[\"$ADMIN_OBJECT_ID\"]"
           fi
 
           echo "::group::Deployment parameters"
           echo "location            $LOCATION"
-          echo "extra parameters    ${EXTRA_PARAMS[*]:-none}"
+          echo "extra parameters    ${#EXTRA_PARAMS[@]} supplied"
           echo "::endgroup::"
 
           az deployment sub create \
@@ -258,9 +362,9 @@ jobs:
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Download package
         uses: actions/download-artifact@v8
@@ -341,19 +445,21 @@ jobs:
   # -------------------------------------------------------------------------------------------
   link-enterprise-policy:
     name: Link Power Platform to the virtual network
-    needs: infrastructure
-    if: ${{ inputs.link-enterprise-policy != false && vars.POWER_PLATFORM_ENVIRONMENT_ID != '' }}
+    needs: [infrastructure, power-platform-environment, resolve]
+    if: ${{ always() && inputs.link-enterprise-policy != false && needs.infrastructure.result == 'success' && (needs.power-platform-environment.outputs.environment-id != '' || needs.resolve.outputs.has-environment-id == 'true') }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    env:
+      ENVIRONMENT_ID: ${{ needs.power-platform-environment.outputs.environment-id || secrets.POWER_PLATFORM_ENVIRONMENT_ID }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Install the Power Platform enterprise policies module
         shell: pwsh
@@ -367,7 +473,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/Set-PowerPlatformSubnetInjection.ps1 `
-            -EnvironmentId '${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}' `
+            -EnvironmentId $env:ENVIRONMENT_ID `
             -EnterprisePolicyResourceId '${{ needs.infrastructure.outputs.enterprise-policy-id }}' `
             -Action Link `
             -Confirm:$false
@@ -375,10 +481,12 @@ jobs:
   # -------------------------------------------------------------------------------------------
   power-platform:
     name: Deploy Power Platform solution
-    needs: [infrastructure, deploy-function]
-    if: ${{ always() && inputs.deploy-power-platform != false && needs.infrastructure.result == 'success' && vars.POWER_PLATFORM_ENVIRONMENT_URL != '' }}
+    needs: [infrastructure, deploy-function, power-platform-environment, resolve]
+    if: ${{ always() && inputs.deploy-power-platform != false && needs.infrastructure.result == 'success' && (needs.power-platform-environment.outputs.environment-url != '' || needs.resolve.outputs.has-environment-url == 'true') }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    env:
+      ENVIRONMENT_URL: ${{ needs.power-platform-environment.outputs.environment-url || secrets.POWER_PLATFORM_ENVIRONMENT_URL }}
     steps:
       - uses: actions/checkout@v5
 
@@ -392,10 +500,10 @@ jobs:
         shell: pwsh
         env:
           FUNCTION_BASE_URL: ${{ needs.infrastructure.outputs.function-base-url }}
-          FUNCTION_APPLICATION_ID_URI: ${{ vars.AZURE_API_APP_ID_URI }}
+          FUNCTION_APPLICATION_ID_URI: ${{ secrets.AZURE_API_APP_ID_URI }}
           ENVIRONMENT_LABEL: ${{ vars.ENVIRONMENT_LABEL || 'Demo' }}
-          CONNECTION_ID_WEBCONTENTS: ${{ vars.POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS }}
-          CONNECTION_ID_OFFICE365: ${{ vars.POWER_PLATFORM_CONNECTION_ID_OFFICE365 }}
+          CONNECTION_ID_WEBCONTENTS: ${{ secrets.POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS }}
+          CONNECTION_ID_OFFICE365: ${{ secrets.POWER_PLATFORM_CONNECTION_ID_OFFICE365 }}
         run: |
           ./scripts/New-DeploymentSettings.ps1 `
             -OutputPath ./powerplatform/out/deploymentSettings.json `
@@ -406,9 +514,9 @@ jobs:
         # client-secret is deliberately omitted. There is no secret in this repository.
         uses: microsoft/powerplatform-actions/import-solution@v1
         with:
-          environment-url: ${{ vars.POWER_PLATFORM_ENVIRONMENT_URL }}
-          app-id: ${{ vars.POWER_PLATFORM_APP_ID }}
-          tenant-id: ${{ vars.POWER_PLATFORM_TENANT_ID }}
+          environment-url: ${{ env.ENVIRONMENT_URL }}
+          app-id: ${{ secrets.POWER_PLATFORM_APP_ID }}
+          tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
           solution-file: powerplatform/out/SecureRequestClassifier.zip
           use-deployment-settings-file: true
           deployment-settings-file: powerplatform/out/deploymentSettings.json
@@ -425,7 +533,7 @@ jobs:
             echo
             echo "| Setting | Value |"
             echo "| --- | --- |"
-            echo "| Environment | \`${{ vars.POWER_PLATFORM_ENVIRONMENT_URL }}\` |"
+            echo "| Environment | \`(redacted)\` |"
             echo "| Solution | \`SecureRequestClassifier\` |"
             echo "| Function base URL | \`${{ needs.infrastructure.outputs.function-base-url }}\` |"
             echo "| Authentication | GitHub OIDC (workload identity federation), no client secret |"
@@ -434,19 +542,21 @@ jobs:
   # -------------------------------------------------------------------------------------------
   verify:
     name: Verify
-    needs: [infrastructure, deploy-function, power-platform, link-enterprise-policy]
+    needs: [infrastructure, deploy-function, power-platform, link-enterprise-policy, power-platform-environment]
     if: ${{ always() && inputs.run-verification != false && needs.infrastructure.result == 'success' }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
+    env:
+      ENVIRONMENT_ID: ${{ needs.power-platform-environment.outputs.environment-id || secrets.POWER_PLATFORM_ENVIRONMENT_ID }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Verify the deployment
         shell: pwsh
@@ -454,8 +564,8 @@ jobs:
           $parameters = @{
             ResourceGroupName = '${{ needs.infrastructure.outputs.resource-group }}'
           }
-          if ('${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}') {
-            $parameters.PowerPlatformEnvironmentId = '${{ vars.POWER_PLATFORM_ENVIRONMENT_ID }}'
+          if ($env:ENVIRONMENT_ID) {
+            $parameters.PowerPlatformEnvironmentId = $env:ENVIRONMENT_ID
           }
           ./scripts/Test-Deployment.ps1 @parameters
 

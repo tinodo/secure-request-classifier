@@ -93,15 +93,15 @@ Once per Power Platform environment:
 
 1. In Power Automate → **Connections** → **New connection** → *HTTP with Microsoft Entra ID (preauthorized)*.
 2. Choose **Log in with Microsoft Entra ID**.
-3. *Microsoft Entra ID Resource URI (Application ID URI)*: the value of the `AZURE_API_APP_ID_URI` variable, for example `api://44444444-…`.
+3. *Microsoft Entra ID Resource URI (Application ID URI)*: the value of the `AZURE_API_APP_ID_URI` secret, for example `api://44444444-…`.
 4. *Base Resource URL*: the Function App base URL, for example `https://func-srclass-demo-ab12cd.azurewebsites.net`.
 5. Sign in.
 6. Read the connection ID and store it as a repository **variable** (a connection ID is an identifier, not a credential):
 
    ```powershell
    pac connection list --environment <environment-url>
-   gh variable set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
-   gh variable set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
+   gh secret set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
+   gh secret set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
    ```
 
 CI then binds the existing connection through the deployment settings file. `scripts/Initialize-EntraResources.ps1` has already created the `oauth2PermissionGrant` that makes step 5 succeed without a consent prompt.
@@ -152,7 +152,7 @@ Content-Type: application/json
 ### Prerequisites the script cannot create for itself
 
 * The calling identity needs the **Power Platform Administrator** directory role. Assigning a directory role is a tenant-administration action outside the workload's scope.
-* It needs **Reader** on the enterprise policy resource. The Bicep *does* grant this — pass the object ID through the `POWER_PLATFORM_ADMIN_OBJECT_ID` repository variable.
+* It needs **Reader** on the enterprise policy resource. The Bicep *does* grant this — pass the object ID through the `POWER_PLATFORM_ADMIN_OBJECT_ID` repository secret.
 
 ---
 
