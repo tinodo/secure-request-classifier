@@ -77,13 +77,13 @@ foreach ($output in $referencedOutputs) {
 # ---------------------------------------------------------------------------------------------
 
 # The definitions live inline in Customizations.xml. They must NOT be split into
-# environmentvariabledefinitions/<schemaname>/ folders: that is the Power Platform Git
-# integration layout, and SolutionPackager copies it into the zip verbatim instead of folding it
-# into customizations.xml, which makes the Dataverse import fail. See Test-SolutionPackage.ps1.
-$gitFormatFolder = Join-Path $RepositoryRoot 'powerplatform/solution/src/environmentvariabledefinitions'
-Assert-True -Name 'Environment variable definitions are not in Git-integration format' `
-    -Condition (-not (Test-Path $gitFormatFolder)) `
-    -Detail "Move $gitFormatFolder inline into Other/Customizations.xml and delete it."
+# environmentvariabledefinitions/<schemaname>/ folders: this version of `pac solution pack` does
+# not fold that layout into customizations.xml, it copies it into the zip verbatim, and the
+# Dataverse import then fails. See Test-SolutionPackage.ps1.
+$looseFolder = Join-Path $RepositoryRoot 'powerplatform/solution/src/environmentvariabledefinitions'
+Assert-True -Name 'Environment variable definitions are not in a separate folder' `
+    -Condition (-not (Test-Path $looseFolder)) `
+    -Detail "Move $looseFolder inline into Other/Customizations.xml and delete it."
 
 $customizationsXml = [xml](Get-FileText 'powerplatform/solution/src/Other/Customizations.xml')
 
@@ -102,9 +102,6 @@ $settings = $settingsTemplate | ConvertFrom-Json
 $settingsSchemaNames = $settings.EnvironmentVariables | ForEach-Object { $_.SchemaName }
 
 foreach ($name in $definitionNames) {
-    Assert-True -Name "Environment variable is registered in Solution.xml: $name" `
-        -Condition ($solutionXml -match [regex]::Escape("schemaName=`"$name`""))
-
     Assert-True -Name "Environment variable has a deployment setting: $name" `
         -Condition ($settingsSchemaNames -contains $name)
 }
@@ -114,20 +111,17 @@ foreach ($name in $settingsSchemaNames) {
         -Condition ($definitionNames -contains $name)
 }
 
-# Every connection reference declared in Solution.xml must also be defined inline. Dataverse
-# stores '_' as '_5F' in RootComponent schema names.
-$connectionReferenceNames = @($customizationsXml.SelectNodes(
-        '/ImportExportXml/connectionreferences/connectionreference')) |
-    ForEach-Object { $_.GetAttribute('connectionreferencelogicalname') }
+# Connection references and environment variable definitions must not be root components.
+# Type 372 is a custom connector, not a connection reference, and Dataverse rejects both with
+# "Cannot add a Root Component ... because it is not in the target system".
+$solutionDocument = [xml] $solutionXml
+foreach ($type in @('372', '380')) {
+    $offenders = @($solutionDocument.SelectNodes('//RootComponent') |
+            Where-Object { $_.GetAttribute('type') -eq $type })
 
-$declaredConnectionReferences = [regex]::Matches(
-    $solutionXml, '<RootComponent\s+type="372"\s+schemaName="(?<name>[^"]+)"') |
-    ForEach-Object { $_.Groups['name'].Value -replace '_5F', '_' }
-
-foreach ($name in $declaredConnectionReferences) {
-    Assert-True -Name "Connection reference is defined in Customizations.xml: $name" `
-        -Condition ($connectionReferenceNames -contains $name) `
-        -Detail "Customizations.xml defines: $($connectionReferenceNames -join ', ')"
+    Assert-True -Name "Solution.xml declares no root component of type $type" `
+        -Condition ($offenders.Count -eq 0) `
+        -Detail 'Connection references and environment variable definitions belong in Customizations.xml only.'
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -174,10 +168,9 @@ if ($flowFile) {
         Assert-True -Name "Flow connection reference is declared in Customizations.xml: $reference" `
             -Condition ($declaredReferences -contains $reference)
 
-        # Solution.xml stores the schema name with underscores escaped as _5F.
-        $escaped = $reference -replace '_', '_5F'
-        Assert-True -Name "Connection reference is a root component: $reference" `
-            -Condition ($solutionXml -match [regex]::Escape($escaped))
+        # Customizations.xml is the only place that may carry it; see the type-372 note above.
+        Assert-True -Name "Connection reference is not a root component: $reference" `
+            -Condition ($solutionXml -notmatch [regex]::Escape($reference))
     }
 
     $settingsReferences = $settings.ConnectionReferences | ForEach-Object { $_.LogicalName }

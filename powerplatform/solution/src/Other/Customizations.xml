@@ -4,27 +4,22 @@
   present (even when empty) and in this exact sequence. "optionsets", "connectionreferences" and
   "environmentvariabledefinitions" are intentionally lowercase; everything else is PascalCase.
 
-  Every component that is not written to its own file by `pac solution unpack` has to live in
-  this file. There are two different on-disk solution formats and they must not be mixed:
+  This file is the only place that carries the connection references and the environment variable
+  definitions. Two rules keep the Dataverse import working, and both were learned the hard way:
 
-    * SolutionPackager format  - what `pac solution pack/unpack` reads and writes, and what this
-                                 folder uses. Connection references and environment variable
-                                 definitions stay INLINE in this file.
-    * Git integration format   - what Power Platform Git integration writes. Components are
-                                 split into per-component folders such as
-                                 environmentvariabledefinitions/<schemaname>/.
+    1. Keep them INLINE here. Split into environmentvariabledefinitions/<schemaname>/ folders,
+       `pac solution pack` does not fold them into customizations.xml - it copies them into the
+       zip verbatim and still exits 0. Dataverse then reads them with its source-control handler
+       and the import dies with "An unexpected error occurred", whose real text is
 
-  Putting Git-integration folders into a SolutionPackager source tree is silently tolerated by
-  `pac solution pack`: the files are copied into the zip verbatim instead of being folded into
-  customizations.xml. Dataverse then tries to read them with its source-control handler and the
-  import dies with "An unexpected error occurred", whose real text is
+           System.InvalidOperationException: The specified node cannot be inserted as the valid
+           child of this node, because the specified node is the wrong type.
+              at System.Xml.XmlNode.AppendChild(XmlNode newChild)
+              at Microsoft.Crm.Tools.ImportExportPublish.SourceControlHandler.ImportEntityFromFile(...)
 
-      System.InvalidOperationException: The specified node cannot be inserted as the valid child
-      of this node, because the specified node is the wrong type.
-         at System.Xml.XmlNode.AppendChild(XmlNode newChild)
-         at Microsoft.Crm.Tools.ImportExportPublish.SourceControlHandler.ImportEntityFromFile(...)
+    2. Do NOT also list them in Solution.xml as root components. See the note in that file.
 
-  scripts/Test-SolutionPackage.ps1 fails the build if that ever comes back.
+  scripts/Test-SolutionPackage.ps1 fails the build if either rule is broken.
 -->
 <ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <Entities />

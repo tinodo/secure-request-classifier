@@ -237,11 +237,12 @@ and `Workflows/<flow>.json` — and nothing else.
 
 ## The solution import fails with "An unexpected error occurred"
 
-### Usually a mixed on-disk solution format.
+### `pac solution import` reports every asynchronous failure with that one sentence.
 
-`pac solution import` reports every asynchronous failure with that one sentence. The real reason is
-recorded in Dataverse; the Deploy workflow prints it automatically from
-`scripts/Get-SolutionImportFailure.ps1`. If it reads
+The real reason is recorded in Dataverse, and the Deploy workflow prints it automatically from
+`scripts/Get-SolutionImportFailure.ps1`. Two causes have bitten this repository.
+
+#### `XmlNode.AppendChild ... the specified node is the wrong type`
 
 ```
 System.InvalidOperationException: The specified node cannot be inserted as the valid child of this
@@ -250,19 +251,38 @@ node, because the specified node is the wrong type.
    at Microsoft.Crm.Tools.ImportExportPublish.SourceControlHandler.ImportEntityFromFile(...)
 ```
 
-then the package mixes the two on-disk solution formats:
+A component folder — for example `environmentvariabledefinitions/<schemaname>/` — was copied into
+the zip verbatim instead of being folded into `customizations.xml`. `pac solution pack` does that
+silently and still exits 0; Dataverse then reads the loose files with its source-control handler
+and crashes.
 
-| Format | Written by | Components |
-| --- | --- | --- |
-| SolutionPackager | `pac solution pack` / `unpack` — used by this repository | inline in `Other/Customizations.xml` |
-| Git integration | Power Platform Git integration | split into `environmentvariabledefinitions/<schemaname>/` and similar folders |
+Keep those components inline in `powerplatform/solution/src/Other/Customizations.xml`, which is
+what `pac solution unpack` produces for this solution.
 
-`pac solution pack` does not reject a Git-integration folder found in a SolutionPackager source
-tree. It copies it into the zip verbatim, exits 0, and Dataverse then crashes trying to read it.
+#### `Cannot add a Root Component ... because it is not in the target system`
 
-Fix it by moving the component inline into `powerplatform/solution/src/Other/Customizations.xml`
-and deleting the folder. `scripts/Test-SolutionPackage.ps1` runs in CI and in the Deploy workflow
-to catch this before the import.
+```
+Cannot add a Root Component srcls_5Fsharedwebcontents_5Fclassifier of type 372 because it is not
+in the target system.
+   at Microsoft.Crm.Tools.ImportExportPublish.ImportRootComponentsHandler.GetSolutionRootsCollection(...)
+```
+
+A connection reference or an environment variable definition was listed in `<RootComponents>`.
+They must not be — `customizations.xml` alone carries them.
+
+Component type **372 is "Connector"**, meaning a *custom connector*, not a connection reference.
+The `componenttype` choice has no value for a connection reference at all, which is why the
+exporter writes `type="connectionreference"` as a string in `MissingDependencies` rather than a
+number. Microsoft's own [CoE Audit Logs solution](https://github.com/microsoft/coe-starter-kit/blob/main/CenterofExcellenceAuditLogs/SolutionPackage/src/Other/Solution.xml)
+declares five connection references in `Customizations.xml` and has exactly two root components,
+both type 29.
+
+The `_5F` spelling seen in real solutions, such as `cat_5Fcustomazuredevops`, is part of a custom
+connector's actual stored name, where `_` is hex-escaped as `5F`. It is not a serialisation escape
+and it does not apply to connection references.
+
+Both invariants are enforced by `scripts/Test-SolutionPackage.ps1`, which runs in CI and in the
+Deploy workflow ahead of the import.
 
 ---
 

@@ -3,29 +3,35 @@
     Fails if the packed Power Platform solution is not a clean SolutionPackager package.
 
 .DESCRIPTION
-    There are two different on-disk solution formats, and `pac solution pack` will happily mix
-    them:
+    Two things have made the Dataverse import fail in ways `pac solution pack` reports as success.
 
-      * SolutionPackager format - components live inline in Other/Customizations.xml.
-      * Git integration format  - components live in per-component folders, for example
-                                  environmentvariabledefinitions/<schemaname>/.
+    1. Component folders that were not folded into customizations.xml.
 
-    A Git-integration folder dropped into a SolutionPackager source tree is NOT folded into
-    customizations.xml. It is copied into the zip verbatim, `pac solution pack` returns exit code
-    0, and the failure only appears later, inside Dataverse, as the entirely unhelpful
+       `pac solution pack` copies a component folder it does not understand - for example
+       environmentvariabledefinitions/<schemaname>/ - into the zip verbatim, and exits 0.
+       Dataverse then reaches it through its source-control handler and dies with
 
-        An unexpected error occurred.
+           An unexpected error occurred.
 
-    whose real text is
+       whose real text is
 
-        System.InvalidOperationException: The specified node cannot be inserted as the valid
-        child of this node, because the specified node is the wrong type.
-           at System.Xml.XmlNode.AppendChild(XmlNode newChild)
-           at Microsoft.Crm.Tools.ImportExportPublish.SourceControlHandler.ImportEntityFromFile(...)
+           System.InvalidOperationException: The specified node cannot be inserted as the valid
+           child of this node, because the specified node is the wrong type.
+              at System.Xml.XmlNode.AppendChild(XmlNode newChild)
+              at Microsoft.Crm.Tools.ImportExportPublish.SourceControlHandler.ImportEntityFromFile(...)
 
-    This script asserts, on the packed zip, that:
-      1. the zip contains only entries a SolutionPackager package is allowed to contain;
-      2. no root component declared in solution.xml is missing from customizations.xml.
+       This repository therefore keeps every such component inline in Other/Customizations.xml,
+       which is what `pac solution unpack` produces for it, and the zip must contain no loose
+       component folders at all.
+
+    2. Connection references and environment variable definitions listed as root components.
+
+       Type 372 is "Connector" - a custom connector - and the componenttype choice has no value
+       for a connection reference at all. Declaring one as a root component fails the import with
+
+           Cannot add a Root Component <name> of type 372 because it is not in the target system.
+
+    This script asserts both invariants on the packed zip.
 
 .PARAMETER SolutionPath
     The packed solution zip to inspect.
@@ -51,8 +57,9 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $failures = [System.Collections.Generic.List[string]]::new()
 
-# Top-level folders a SolutionPackager zip is allowed to contain. Anything else is either a
-# Git-integration component folder or a stray file, and both break the import.
+# Top-level folders the packed zip is allowed to contain. These carry binary or free-form
+# payloads that cannot be expressed inline in customizations.xml. Anything else is a component
+# folder `pac solution pack` failed to fold in, and it will break the import.
 $allowedFolders = @('Workflows', 'CanvasApps', 'WebResources', 'AppModules', 'Reports', 'Formulas', 'pluginassemblies')
 $allowedRootFiles = @('solution.xml', 'customizations.xml', '[Content_Types].xml', 'content_types.xml')
 
@@ -76,9 +83,10 @@ try {
 
         if ($allowedFolders -notcontains $segments[0]) {
             $failures.Add(
-                "'$($segments[0])/' is a Git-integration component folder, not a SolutionPackager " +
-                "folder. Move its contents inline into powerplatform/solution/src/Other/Customizations.xml " +
-                "and delete the folder. Offending entry: $entry")
+                "'$($segments[0])/' was copied into the package verbatim instead of being folded " +
+                'into customizations.xml. Move its contents inline into ' +
+                'powerplatform/solution/src/Other/Customizations.xml and delete the folder. ' +
+                "Offending entry: $entry")
         }
     }
 
@@ -99,35 +107,45 @@ try {
     if (-not $customizationsXml) { $failures.Add('the package has no customizations.xml') }
 
     if ($solutionXml -and $customizationsXml) {
-        # Component type -> the element that must carry it in customizations.xml, and the
-        # attribute that holds its schema name.
-        $componentTypes = @{
-            '372' = @{ Path = 'connectionreferences/connectionreference'; Attribute = 'connectionreferencelogicalname'; Label = 'connection reference' }
-            '380' = @{ Path = 'environmentvariabledefinitions/environmentvariabledefinition'; Attribute = 'schemaname'; Label = 'environment variable definition' }
+        # Connection references and environment variable definitions must NOT be root components.
+        #
+        # Type 372 is "Connector" - a custom connector. The componenttype choice has no value for
+        # a connection reference at all. Listing one as a root component fails the import with
+        #   Cannot add a Root Component <name> of type 372 because it is not in the target system.
+        # Environment variable definitions (380) behave the same way. Microsoft's own solutions
+        # declare both only in customizations.xml; see the note in Other/Solution.xml.
+        $forbiddenRootComponents = @{
+            '372' = 'a connection reference (type 372 is a custom connector)'
+            '380' = 'an environment variable definition'
         }
 
-        $rootComponents = $solutionXml.SelectNodes('//RootComponent')
-
-        foreach ($component in $rootComponents) {
+        foreach ($component in $solutionXml.SelectNodes('//RootComponent')) {
             $type = $component.GetAttribute('type')
-            if (-not $componentTypes.ContainsKey($type)) { continue }
+            if (-not $forbiddenRootComponents.ContainsKey($type)) { continue }
 
-            $schemaName = $component.GetAttribute('schemaName')
-            if ([string]::IsNullOrWhiteSpace($schemaName)) { continue }
+            $name = $component.GetAttribute('schemaName')
+            if ([string]::IsNullOrWhiteSpace($name)) { $name = $component.GetAttribute('id') }
 
-            # Dataverse stores '_' as '_5F' in RootComponent schema names.
-            $logicalName = $schemaName -replace '_5F', '_'
+            $failures.Add(
+                "solution.xml declares '$name' as a root component of type $type. " +
+                "$($forbiddenRootComponents[$type]) belongs in customizations.xml only - remove " +
+                'the RootComponent line.')
+        }
 
-            $definition = $componentTypes[$type]
-            $matched = $customizationsXml.SelectNodes("/ImportExportXml/$($definition.Path)") |
-                Where-Object { $_.GetAttribute($definition.Attribute) -eq $logicalName }
+        # Everything the flow connects through has to be declared in customizations.xml, because
+        # that is now the only place carrying it.
+        $connectionReferences = @($customizationsXml.SelectNodes(
+                '/ImportExportXml/connectionreferences/connectionreference'))
 
-            if (-not $matched) {
-                $failures.Add(
-                    "root component type $type ($($definition.Label)) '$schemaName' is declared in " +
-                    "solution.xml but has no <$(Split-Path -Leaf ($definition.Path -replace '/', '\'))> " +
-                    "entry in customizations.xml")
-            }
+        if ($connectionReferences.Count -eq 0) {
+            $failures.Add('customizations.xml declares no connection references')
+        }
+
+        $definitions = @($customizationsXml.SelectNodes(
+                '/ImportExportXml/environmentvariabledefinitions/environmentvariabledefinition'))
+
+        if ($definitions.Count -eq 0) {
+            $failures.Add('customizations.xml declares no environment variable definitions')
         }
     }
 }
