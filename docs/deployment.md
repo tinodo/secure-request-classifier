@@ -54,6 +54,7 @@ This creates, idempotently:
 | Pre-authorized application | The connector added to the API's `preAuthorizedApplications` |
 | Azure role assignments | `Contributor` and `Role Based Access Control Administrator` at subscription scope |
 | Power Platform Administrator | The directory role the deployment identity needs to link the enterprise policy. Skip with `-SkipPowerPlatformAdminRole` |
+| Power Platform management application | Registers the deployment app via the BAP `adminApplications` API. **The directory role alone is not enough** — without this registration a service principal calling the Power Platform admin APIs is rejected with HTTP 403 "does not have permission to access the path". Equivalent to `New-PowerAppManagementApp` |
 
 Run it with `-WhatIf` first if you want to see exactly what it will do, or `-SkipRoleAssignments` if a different team owns RBAC.
 

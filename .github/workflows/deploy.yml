@@ -287,12 +287,16 @@ jobs:
           LOCATION="${{ vars.AZURE_LOCATION || 'westeurope' }}"
           DEPLOYMENT_NAME="srclass-$(date +%Y%m%d%H%M%S)"
 
+          # Each flag and its value must be SEPARATE array elements. Building them as
+          # "apiApplicationId=x" and then prefixing with "${EXTRA_PARAMS[@]/#/--parameters }"
+          # produces one argument containing a space, which az reads as a parameter literally
+          # named "--parameters apiApplicationId" and rejects.
           EXTRA_PARAMS=()
-          [ -n "$API_APP_ID" ] && EXTRA_PARAMS+=("apiApplicationId=$API_APP_ID")
-          [ -n "${{ vars.POWER_PLATFORM_REGION }}" ] && EXTRA_PARAMS+=("powerPlatformRegion=${{ vars.POWER_PLATFORM_REGION }}")
-          [ -n "${{ vars.RESOURCE_GROUP_NAME }}" ] && EXTRA_PARAMS+=("resourceGroupName=${{ vars.RESOURCE_GROUP_NAME }}")
-          [ -n "${{ vars.CREATE_PRIVATE_DNS_ZONES }}" ] && EXTRA_PARAMS+=("createPrivateDnsZones=${{ vars.CREATE_PRIVATE_DNS_ZONES }}")
-          [ -n "${{ vars.CREATE_PRIVATE_DNS_ZONE_GROUPS }}" ] && EXTRA_PARAMS+=("createPrivateDnsZoneGroups=${{ vars.CREATE_PRIVATE_DNS_ZONE_GROUPS }}")
+          [ -n "$API_APP_ID" ] && EXTRA_PARAMS+=(--parameters "apiApplicationId=$API_APP_ID")
+          [ -n "${{ vars.POWER_PLATFORM_REGION }}" ] && EXTRA_PARAMS+=(--parameters "powerPlatformRegion=${{ vars.POWER_PLATFORM_REGION }}")
+          [ -n "${{ vars.RESOURCE_GROUP_NAME }}" ] && EXTRA_PARAMS+=(--parameters "resourceGroupName=${{ vars.RESOURCE_GROUP_NAME }}")
+          [ -n "${{ vars.CREATE_PRIVATE_DNS_ZONES }}" ] && EXTRA_PARAMS+=(--parameters "createPrivateDnsZones=${{ vars.CREATE_PRIVATE_DNS_ZONES }}")
+          [ -n "${{ vars.CREATE_PRIVATE_DNS_ZONE_GROUPS }}" ] && EXTRA_PARAMS+=(--parameters "createPrivateDnsZoneGroups=${{ vars.CREATE_PRIVATE_DNS_ZONE_GROUPS }}")
 
           # The Power Platform administrator identity needs Reader on the enterprise policy in
           # order to link it to an environment.
@@ -303,7 +307,7 @@ jobs:
 
           echo "::group::Deployment parameters"
           echo "location            $LOCATION"
-          echo "extra parameters    ${#EXTRA_PARAMS[@]} supplied"
+          echo "extra parameters    $(( ${#EXTRA_PARAMS[@]} / 2 )) supplied"
           echo "::endgroup::"
 
           az deployment sub create \
@@ -312,7 +316,7 @@ jobs:
             --template-file infra/main.bicep \
             --parameters infra/parameters/demo.bicepparam \
             --parameters enterprisePolicyReaderPrincipalIds="$READER_IDS" \
-            ${EXTRA_PARAMS[@]+"${EXTRA_PARAMS[@]/#/--parameters }"} \
+            ${EXTRA_PARAMS[@]+"${EXTRA_PARAMS[@]}"} \
             --output none
 
           echo "::group::Deployment outputs"

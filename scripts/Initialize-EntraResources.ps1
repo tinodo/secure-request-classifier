@@ -568,6 +568,37 @@ if (-not $SkipPowerPlatformAdminRole) {
 
     Set-DirectoryRoleMember -RoleTemplateId $script:PowerPlatformAdministratorRoleTemplateId `
         -PrincipalObjectId $deploymentSp.id -RoleLabel 'Power Platform Administrator'
+
+    # The directory role alone is NOT sufficient. A service principal calling the Business
+    # Application Platform admin APIs (/providers/Microsoft.BusinessAppPlatform/scopes/admin/...)
+    # is rejected with HTTP 403 "does not have permission to access the path" unless the
+    # application is also registered as a Power Platform management application. This is the
+    # REST equivalent of New-PowerAppManagementApp.
+    # https://learn.microsoft.com/en-us/power-platform/admin/powershell-create-service-principal
+    Write-Step 'Registering the deployment app as a Power Platform management application'
+
+    if ($PSCmdlet.ShouldProcess($deploymentApp.appId, 'Register as a Power Platform management application')) {
+        try {
+            $bapToken = az account get-access-token --resource 'https://service.powerapps.com/' --query accessToken --output tsv 2>$null
+
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($bapToken)) {
+                throw 'could not acquire a token for https://service.powerapps.com/'
+            }
+
+            Invoke-RestMethod -Method PUT `
+                -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/adminApplications/$($deploymentApp.appId)?api-version=2020-10-01" `
+                -Headers @{ Authorization = "Bearer $($bapToken.Trim())" } `
+                -ContentType 'application/json' | Out-Null
+
+            Write-Host '    registered as a management application' -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Could not register the management application: $($_.Exception.Message)"
+            Write-Warning 'Without this, the deployment identity gets HTTP 403 from the Power Platform admin APIs.'
+            Write-Warning 'A Power Platform or Global Administrator can register it with:'
+            Write-Warning "    New-PowerAppManagementApp -ApplicationId $($deploymentApp.appId)"
+        }
+    }
 }
 else {
     Write-Step 'Skipping the Power Platform Administrator role (-SkipPowerPlatformAdminRole)'
