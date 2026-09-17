@@ -551,18 +551,20 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-SolutionPackage.ps1
 
+      # Connection references are deliberately NOT bound here. Both connectors use delegated-user
+      # OAuth, so a person creates the connections once in the flow designer and binds them
+      # there. This job runs as the deployment service principal, which has no permission on a
+      # connection owned by a user, so binding fails with ConnectionAuthorizationFailed and
+      # destroys the binding on the way. See docs/limitations.md.
       - name: Render deployment settings
         shell: pwsh
         env:
           FUNCTION_BASE_URL: ${{ needs.infrastructure.outputs.function-base-url }}
           FUNCTION_APPLICATION_ID_URI: ${{ secrets.AZURE_API_APP_ID_URI }}
           ENVIRONMENT_LABEL: ${{ vars.ENVIRONMENT_LABEL || 'Demo' }}
-          CONNECTION_ID_WEBCONTENTS: ${{ secrets.POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS }}
-          CONNECTION_ID_OFFICE365: ${{ secrets.POWER_PLATFORM_CONNECTION_ID_OFFICE365 }}
         run: |
           ./scripts/New-DeploymentSettings.ps1 `
-            -OutputPath ./powerplatform/out/deploymentSettings.json `
-            -AllowMissingConnections
+            -OutputPath ./powerplatform/out/deploymentSettings.json
 
       - name: Import the solution
         # Federation is selected implicitly: app-id and tenant-id are supplied and
@@ -603,6 +605,26 @@ jobs:
             echo "| Solution | \`SecureRequestClassifier\` |"
             echo "| Function base URL | \`${{ needs.infrastructure.outputs.function-base-url }}\` |"
             echo "| Authentication | GitHub OIDC (workload identity federation), no client secret |"
+            echo
+            echo "### One manual step remains: create the two connections"
+            echo
+            echo "Both connectors use delegated-user OAuth, so a person signs in once per"
+            echo "environment. The pipeline never binds them, so this survives every later deploy."
+            echo
+            echo "The values you need are already in the solution, under **Environment variables**:"
+            echo
+            echo "| Environment variable | Use it for |"
+            echo "| --- | --- |"
+            echo "| \`srcls_FunctionBaseUrl\` | *Base Resource URL* |"
+            echo "| \`srcls_FunctionApplicationIdUri\` | *Microsoft Entra ID Resource URI (Application ID URI)* |"
+            echo
+            echo "1. Open the **Classify and Notify** flow in Power Automate."
+            echo "2. On **Invoke classification API**, add a connection:"
+            echo "   **HTTP with Microsoft Entra ID (preauthorized)** — not the v2 connector."
+            echo "3. On **Send confirmation email**, add an **Office 365 Outlook** connection."
+            echo "4. Save the flow and turn it on."
+            echo
+            echo "See [docs/deployment.md](../blob/main/docs/deployment.md#create-the-connections-and-turn-the-flow-on)."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------------------------

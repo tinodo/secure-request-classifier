@@ -196,23 +196,43 @@ az resource show --ids <policy-id> --api-version 2020-10-30-preview --query prop
 
 ---
 
-## Solution import fails on connection references
+## Solution import fails with ConnectionAuthorizationFailed
 
 ### Symptom
-`The connection reference ... could not be resolved`, or the flow imports but cannot be turned on.
+
+```
+ConnectionAuthorizationFailed
+The caller with object id '<service-principal>' does not have the minimum required permission
+to perform the requested operation on connection '<id>' under API 'shared_webcontents'
+   at Microsoft.Dynamics.PowerPlatformConnectionReferences.Plugins.PreValidateConnectionReferenceUpdate
+```
 
 ### Cause
-The deployment settings file had no `ConnectionId` for one or both connection references. The workflow passes `-AllowMissingConnections`, so the import succeeds but leaves them unbound.
+
+Something asked the solution import to bind a connection reference to a connection owned by a
+person. The import runs as the deployment service principal, which has no permission on that
+connection. The attempt also destroys a binding that was already working.
 
 ### Fix
 
-```powershell
-pac connection list --environment <environment-url>
-gh secret set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
-gh secret set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
-```
+The deployment settings file must contain **no `ConnectionReferences` section**, and no
+`CONNECTION_ID_*` values should be supplied to `scripts/New-DeploymentSettings.ps1`. Connections
+are created and bound by a person in the flow designer, once per environment, and the pipeline
+leaves them alone.
 
-Then re-run the Deploy workflow. See [limitations.md](limitations.md#2-the-connector-connection-must-be-created-once-by-a-person).
+See [limitations.md](limitations.md#2-connections-are-created-and-bound-by-a-person-once-per-environment).
+
+---
+
+## The flow imports but shows "Invalid connection", or cannot be turned on
+
+### Cause
+Its connection references are not bound to connections yet. This is expected on a new environment.
+
+### Fix
+Open the flow in Power Automate, create a connection on each action that needs one, save, and turn
+the flow on. Full steps in
+[deployment.md](deployment.md#create-the-connections-and-turn-the-flow-on).
 
 ---
 

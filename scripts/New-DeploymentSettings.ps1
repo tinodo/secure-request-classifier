@@ -4,11 +4,13 @@
 
 .DESCRIPTION
     Replaces #{TOKEN}# placeholders in powerplatform/config/deploymentSettings.template.json
-    with values supplied by the caller (in CI: Bicep outputs plus GitHub repository
-    *variables*, never secrets).
+    with values supplied by the caller (in CI: Bicep outputs plus GitHub repository secrets and
+    variables).
 
-    The rendered file contains connection IDs and URLs. It is written to a path that is
-    git-ignored and is never committed.
+    The rendered file contains only environment variable values. It deliberately carries NO
+    ConnectionReferences: both connectors use delegated-user OAuth, so a person creates the
+    connections once in the flow designer and binds them there, and the pipeline leaves those
+    bindings alone on every later import.
 
 .PARAMETER TemplatePath
     Path to the template. Defaults to the repository's committed template.
@@ -25,8 +27,6 @@
         FUNCTION_BASE_URL          = 'https://func-srclass-demo-ab12cd.azurewebsites.net'
         FUNCTION_APPLICATION_ID_URI = 'api://00000000-0000-0000-0000-000000000000'
         ENVIRONMENT_LABEL          = 'Demo'
-        CONNECTION_ID_WEBCONTENTS  = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-        CONNECTION_ID_OFFICE365    = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
     }
 #>
 [CmdletBinding()]
@@ -36,9 +36,7 @@ param(
     [Parameter(Mandatory)]
     [string] $OutputPath,
 
-    [hashtable] $Values = @{},
-
-    [switch] $AllowMissingConnections
+    [hashtable] $Values = @{}
 )
 
 Set-StrictMode -Version Latest
@@ -76,47 +74,15 @@ foreach ($token in $tokens) {
     $content = $content.Replace("#{$token}#", $value)
 }
 
-# Connection IDs are the one set of values that cannot be produced by automation: the
-# "HTTP with Microsoft Entra ID (preauthorized)" connector uses a delegated-user connection
-# that a person must create once. See docs/limitations.md.
-$connectionTokens = @($missing | Where-Object { $_ -like 'CONNECTION_ID_*' })
-$otherMissing = @($missing | Where-Object { $_ -notlike 'CONNECTION_ID_*' })
-
-if ($otherMissing.Count -gt 0) {
-    throw "No value supplied for required token(s): $($otherMissing -join ', ')"
+if ($missing.Count -gt 0) {
+    throw "No value supplied for required token(s): $($missing -join ', ')"
 }
 
-if ($connectionTokens.Count -gt 0) {
-    if (-not $AllowMissingConnections) {
-        throw @"
-No value supplied for connection token(s): $($connectionTokens -join ', ')
-
-These are the IDs of connections that already exist in the target Power Platform environment.
-List them with:
-
-    pac connection list --environment <environment-url>
-
-then set them as GitHub repository variables (they are identifiers, not credentials):
-
-    gh variable set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
-    gh variable set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
-
-Re-run with -AllowMissingConnections to import the solution without binding connections; the
-flow will import but stay unbound and cannot be turned on.
-"@
-    }
-
-    Write-Warning "Connection token(s) not supplied: $($connectionTokens -join ', ')."
-    Write-Warning 'The solution will import, but its connection references will be unbound and the flow cannot be activated.'
-
-    # Remove unbound connection reference entries rather than writing empty GUIDs, which the
-    # importer rejects.
-    $settings = $content | ConvertFrom-Json
-    $settings.ConnectionReferences = @(
-        $settings.ConnectionReferences | Where-Object { -not [string]::IsNullOrWhiteSpace($_.ConnectionId) }
-    )
-    $content = $settings | ConvertTo-Json -Depth 20
-}
+# There is deliberately no connection handling here. Both connectors use delegated-user OAuth:
+# a person creates the connections once in the flow designer and binds them there. The pipeline
+# must not rebind them, because the import runs as the deployment service principal, which has no
+# permission on a connection owned by a user - the bind fails with ConnectionAuthorizationFailed
+# and destroys the binding on the way. See docs/limitations.md.
 
 $outputDirectory = Split-Path -Parent $OutputPath
 if ($outputDirectory -and -not (Test-Path $outputDirectory)) {

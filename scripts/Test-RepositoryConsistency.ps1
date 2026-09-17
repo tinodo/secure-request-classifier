@@ -173,11 +173,12 @@ if ($flowFile) {
             -Condition ($solutionXml -notmatch [regex]::Escape($reference))
     }
 
-    $settingsReferences = $settings.ConnectionReferences | ForEach-Object { $_.LogicalName }
-    foreach ($reference in $declaredReferences) {
-        Assert-True -Name "Connection reference has a deployment setting: $reference" `
-            -Condition ($settingsReferences -contains $reference)
-    }
+    # The deployment settings file must NOT carry connection references. Binding them makes the
+    # import run as the deployment service principal against a connection owned by a person,
+    # which fails with ConnectionAuthorizationFailed and destroys the existing binding.
+    Assert-True -Name 'Deployment settings do not bind connection references' `
+        -Condition (-not ($settings.PSObject.Properties.Name -contains 'ConnectionReferences')) `
+        -Detail 'Connections are created and bound by a person; the pipeline must leave them alone.'
 
     # 5. The flow must use the VNet-supported connector and action
     Assert-True -Name 'Flow uses the HTTP with Microsoft Entra ID (preauthorized) connector' `
