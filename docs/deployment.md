@@ -190,11 +190,42 @@ Both connections are created by a person, once per environment, directly in the 
 for why this cannot be automated. Do it after the first deployment: the Function App base URL is a
 deployment output.
 
+#### Where to find the two values
+
+**You do not need to go to Azure.** The deployment writes both values into the solution's own
+environment variables, in the same environment you are about to work in:
+
+| Environment variable | Display name | Use it for |
+| --- | --- | --- |
+| `srcls_FunctionBaseUrl` | Function base URL | *Base Resource URL* |
+| `srcls_FunctionApplicationIdUri` | Function Application ID URI | *Microsoft Entra ID Resource URI (Application ID URI)* |
+
+Read them in [make.powerapps.com](https://make.powerapps.com) → **Solutions** → **Secure Request
+Classifier** → **Environment variables**, or from the CLI:
+
+```powershell
+pac env select --environment <environment-url>
+pac env list-settings          # or open the solution in the maker portal
+```
+
+The **Deploy** workflow's run summary also prints the Function base URL and restates these steps.
+The Application ID URI is not printed there: it is a repository secret, so GitHub masks it in run
+logs. Take it from the environment variable above.
+
+Other places the same values exist, if you prefer:
+
+| Value | Also found in |
+| --- | --- |
+| Function base URL | Azure portal → the Function App → **Overview** → *Default domain*; or `az functionapp show --name <app> --resource-group <rg> --query defaultHostName` |
+| Application ID URI | Entra admin centre → **App registrations** → *Secure Request Classifier - Function API* → **Expose an API**; or `az ad app list --display-name "Secure Request Classifier - Function API" --query "[0].identifierUris[0]" -o tsv` |
+
+#### The steps
+
 1. Open the **Classify and Notify** flow in Power Automate.
 2. On the **Invoke classification API** action, create a new connection:
    * Connector: **HTTP with Microsoft Entra ID (preauthorized)** — not the v2 connector
-   * *Microsoft Entra ID Resource URI (Application ID URI)*: the `AZURE_API_APP_ID_URI` value
-   * *Base Resource URL*: the Function App base URL
+   * *Microsoft Entra ID Resource URI (Application ID URI)*: the `srcls_FunctionApplicationIdUri` value, for example `api://44444444-4444-4444-4444-444444444444`
+   * *Base Resource URL*: the `srcls_FunctionBaseUrl` value, for example `https://func-srclass-demo-ab12cd.azurewebsites.net`
    * Sign in
 3. On the **Send confirmation email** action, create an **Office 365 Outlook** connection.
 4. Save the flow and turn it on.

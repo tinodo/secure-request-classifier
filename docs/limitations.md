@@ -116,20 +116,35 @@ Additionally, under VNet support the connector's **Get web resource** action is 
 
 ### The manual step
 
-Once per Power Platform environment, after the first deployment:
+Once per Power Platform environment, after the first deployment.
+
+**Where the values come from.** You do not need Azure portal access. The deployment writes both
+into the solution's own environment variables, in the environment you are already working in —
+[make.powerapps.com](https://make.powerapps.com) → **Solutions** → **Secure Request Classifier** →
+**Environment variables**:
+
+| Environment variable | Use it for |
+| --- | --- |
+| `srcls_FunctionBaseUrl` | *Base Resource URL* |
+| `srcls_FunctionApplicationIdUri` | *Microsoft Entra ID Resource URI (Application ID URI)* |
+
+**The steps.**
 
 1. Open the **Classify and Notify** flow in Power Automate.
 2. On the **Invoke classification API** action, create a new connection:
    * Connector: **HTTP with Microsoft Entra ID (preauthorized)** — not the v2 connector
-   * *Microsoft Entra ID Resource URI (Application ID URI)*: the `AZURE_API_APP_ID_URI` value, for example `api://44444444-…`
-   * *Base Resource URL*: the Function App base URL, for example `https://func-srclass-demo-ab12cd.azurewebsites.net`
+   * *Microsoft Entra ID Resource URI (Application ID URI)*: the `srcls_FunctionApplicationIdUri` value
+   * *Base Resource URL*: the `srcls_FunctionBaseUrl` value
    * Sign in
 3. On the **Send confirmation email** action, create an **Office 365 Outlook** connection.
 4. Save the flow and turn it on.
 
-`scripts/Initialize-EntraResources.ps1` has already created the `oauth2PermissionGrant` that lets step 2 complete without a consent prompt.
+`scripts/Initialize-EntraResources.ps1` has already created the `oauth2PermissionGrant` that lets
+step 2 complete without a consent prompt.
 
-Every later deployment updates the flow, the environment variables and the infrastructure, and leaves those connections bound.
+Every later deployment updates the flow, the environment variables and the infrastructure, and
+leaves those connections bound. Full walkthrough, including other places the same values can be
+read from, in [deployment.md](deployment.md#create-the-connections-and-turn-the-flow-on).
 
 > Changing preauthorizations can take up to an hour to affect connections that already existed. New connections pick the change up immediately. — connector reference, Known Issues
 

@@ -14,6 +14,13 @@ on:
 permissions:
   contents: read
 
+# A branch push and opening a pull request for that branch are two events on the same ref, so
+# both triggers fire and CI runs twice for one commit. Sharing a concurrency group keyed on the
+# ref means the later run cancels the earlier one, leaving a single effective run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOTNET_VERSION: '10.0.x'
   DOTNET_NOLOGO: 'true'
