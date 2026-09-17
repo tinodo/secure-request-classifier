@@ -552,6 +552,17 @@ jobs:
           run-asynchronously: true
           max-async-wait-time: 60
 
+      - name: Explain the import failure
+        if: failure()
+        shell: pwsh
+        # `pac solution import` reports async failures as "An unexpected error occurred". The
+        # real reason lives in Dataverse, readable here because this job runs as the deployment
+        # service principal, which holds System Administrator.
+        env:
+          ENVIRONMENT_URL: ${{ steps.environment.outputs.environment-url }}
+        run: |
+          ./scripts/Get-SolutionImportFailure.ps1 -EnvironmentUrl $env:ENVIRONMENT_URL
+
       - name: Summarise
         if: always()
         run: |
