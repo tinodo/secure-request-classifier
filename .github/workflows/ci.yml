@@ -270,8 +270,15 @@ jobs:
             fail=1
           fi
 
-          if ! grep -q "publicNetworkAccess = 'Disabled'" infra/parameters/demo.bicepparam; then
+          # The parameter names are functionAppPublicNetworkAccess and
+          # storagePublicNetworkAccess; grep is case-sensitive, so match them exactly.
+          if ! grep -q "functionAppPublicNetworkAccess = 'Disabled'" infra/parameters/demo.bicepparam; then
             echo "::error::demo.bicepparam must ship with the Function App public network access disabled."
+            fail=1
+          fi
+
+          if ! grep -q "storagePublicNetworkAccess = 'Disabled'" infra/parameters/demo.bicepparam; then
+            echo "::error::demo.bicepparam must ship with storage public network access disabled."
             fail=1
           fi
 
