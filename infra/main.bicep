@@ -550,6 +550,9 @@ output powerPlatformSubnetName string = primaryNetwork.outputs.powerPlatformSubn
 @description('ARM resource ID of the Power Platform enterprise policy, or empty.')
 output enterprisePolicyResourceId string = deployEnterprisePolicy ? enterprisePolicy!.outputs.enterprisePolicyId : ''
 
+@description('Name of the Power Platform enterprise policy, or empty. Emitted separately from the full resource ID because GitHub Actions drops a job output that contains a secret, and the resource ID embeds the subscription ID.')
+output enterprisePolicyName string = deployEnterprisePolicy ? enterprisePolicy!.outputs.enterprisePolicyName : ''
+
 @description('Power Platform systemId of the enterprise policy, used by the link operation.')
 output enterprisePolicySystemId string = deployEnterprisePolicy ? enterprisePolicy!.outputs.enterprisePolicySystemId : ''
 
