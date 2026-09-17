@@ -159,6 +159,15 @@ param businessDayEndUtcHour int = 17
 param deployEnterprisePolicy bool = true
 
 @description('''
+Set to true when the enterprise policy already exists AND is linked to an environment. Power
+Platform refuses any write to a linked policy with EnterprisePolicyUpdateNotAllowed, so a second
+deployment would fail even when nothing about the policy changed. The deploy workflow detects
+this and sets the flag, which skips the policy write while leaving everything else idempotent.
+To genuinely change the policy, unlink the environment first.
+''')
+param enterprisePolicyIsLinked bool = false
+
+@description('''
 Object IDs of the Power Platform administrators (users or service principals) that must be
 able to link the enterprise policy to an environment. Microsoft requires Reader on the policy
 resource for this.
@@ -491,7 +500,11 @@ module storagePrivateEndpointModules 'modules/private-endpoint.bicep' = [
 // Power Platform enterprise policy
 // =============================================================================================
 
-module enterprisePolicy 'modules/power-platform-enterprise-policy.bicep' = if (deployEnterprisePolicy) {
+// True only when this deployment actually writes the policy. A policy that is already linked to
+// an environment cannot be written at all, so the module is skipped in that case.
+var enterprisePolicyWasWritten = deployEnterprisePolicy && !enterprisePolicyIsLinked
+
+module enterprisePolicy 'modules/power-platform-enterprise-policy.bicep' = if (enterprisePolicyWasWritten) {
   scope: resourceGroupResource
   name: 'enterprise-policy'
   params: {
@@ -559,13 +572,22 @@ output failoverVirtualNetworkId string = deployFailoverNetwork ? failoverNetwork
 output powerPlatformSubnetName string = primaryNetwork.outputs.powerPlatformSubnetName
 
 @description('ARM resource ID of the Power Platform enterprise policy, or empty.')
-output enterprisePolicyResourceId string = deployEnterprisePolicy ? enterprisePolicy!.outputs.enterprisePolicyId : ''
+output enterprisePolicyResourceId string = deployEnterprisePolicy
+  ? (enterprisePolicyWasWritten
+      ? enterprisePolicy!.outputs.enterprisePolicyId
+      : resourceId(
+          subscription().subscriptionId,
+          resourceGroupResource.name,
+          'Microsoft.PowerPlatform/enterprisePolicies',
+          names.enterprisePolicy
+        ))
+  : ''
 
-@description('Name of the Power Platform enterprise policy, or empty. Emitted separately from the full resource ID because GitHub Actions drops a job output that contains a secret, and the resource ID embeds the subscription ID.')
-output enterprisePolicyName string = deployEnterprisePolicy ? enterprisePolicy!.outputs.enterprisePolicyName : ''
+@description('Name of the Power Platform enterprise policy, or empty. Emitted separately from the full resource ID because GitHub Actions drops a job output that contains a secret, and the resource ID embeds the subscription ID. Derived from the naming convention rather than the module, so it is still correct on a re-run where the policy write was skipped because the policy is already linked.')
+output enterprisePolicyName string = deployEnterprisePolicy ? names.enterprisePolicy : ''
 
-@description('Power Platform systemId of the enterprise policy, used by the link operation.')
-output enterprisePolicySystemId string = deployEnterprisePolicy ? enterprisePolicy!.outputs.enterprisePolicySystemId : ''
+@description('Power Platform systemId of the enterprise policy. Empty when the policy write was skipped because the policy is already linked to an environment.')
+output enterprisePolicySystemId string = enterprisePolicyWasWritten ? enterprisePolicy!.outputs.enterprisePolicySystemId : ''
 
 @description('Power Platform geography name used for the enterprise policy location.')
 output enterprisePolicyLocation string = enterprisePolicyLocation

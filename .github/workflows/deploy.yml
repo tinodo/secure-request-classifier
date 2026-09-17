@@ -255,6 +255,19 @@ jobs:
             fi
           done
 
+      - name: Detect an already-linked enterprise policy
+        id: policy
+        shell: pwsh
+        # Power Platform refuses ANY write to an enterprise policy that is linked to an
+        # environment, failing with EnterprisePolicyUpdateNotAllowed, so the second and every
+        # later deployment would fail even when nothing changed. The link is NOT visible on the
+        # Azure resource, only on the Power Platform environment, so it is read from there.
+        # On the first deployment the environment may not exist yet, which correctly reports
+        # "not linked" and the policy is created as normal.
+        run: |
+          ./scripts/Resolve-PowerPlatformEnvironment.ps1 `
+            -DisplayName '${{ vars.POWER_PLATFORM_ENVIRONMENT_NAME || 'srclass-demo' }}' | Out-Null
+
       - name: Deploy infrastructure
         id: deploy
         shell: bash
@@ -298,6 +311,7 @@ jobs:
             --template-file infra/main.bicep \
             --parameters infra/parameters/demo.bicepparam \
             --parameters enterprisePolicyReaderPrincipalIds="$READER_IDS" \
+            --parameters enterprisePolicyIsLinked=${{ steps.policy.outputs.vnet-policy-linked }} \
             ${EXTRA_PARAMS[@]+"${EXTRA_PARAMS[@]}"} \
             --output none
 

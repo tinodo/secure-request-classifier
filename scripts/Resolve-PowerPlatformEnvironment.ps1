@@ -95,6 +95,7 @@ $environment = $candidates | Select-Object -First 1
 if (-not $environment) {
     Write-StepOutput -Name 'environment-id' -Value ''
     Write-StepOutput -Name 'environment-url' -Value ''
+    Write-StepOutput -Name 'vnet-policy-linked' -Value 'false'
     Write-StepOutput -Name 'found' -Value 'false'
 
     if ($Required) {
@@ -112,15 +113,46 @@ if ($environment.properties.PSObject.Properties.Name -contains 'linkedEnvironmen
     $instanceUrl = Protect-LogValue $environment.properties.linkedEnvironmentMetadata.instanceUrl
 }
 
+# Whether a NetworkInjection enterprise policy is currently linked to this environment.
+#
+# This matters because Power Platform refuses ANY write to a linked enterprise policy, failing
+# the whole deployment with EnterprisePolicyUpdateNotAllowed. The link state is NOT visible on
+# the Azure side: the ARM resource exposes only its VNet configuration and systemId. It is only
+# observable here, on the environment.
+$vnetPolicyLinked = 'false'
+
+$detailUri = "${bapEndpoint}providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$($environment.name)" +
+             "?api-version=$bapApiVersion&`$expand=properties.enterprisePolicies"
+
+$detailResponse = Invoke-WebRequest -Uri $detailUri -Method GET -SkipHttpErrorCheck -Headers @{
+    Authorization  = "Bearer $($token.Trim())"
+    'Content-Type' = 'application/json'
+}
+
+if ($detailResponse.StatusCode -eq 200) {
+    $detail = $detailResponse.Content | ConvertFrom-Json
+    $policies = $detail.properties.PSObject.Properties.Name -contains 'enterprisePolicies' ? $detail.properties.enterprisePolicies : $null
+
+    if ($policies -and ($policies.PSObject.Properties.Name -contains 'vNets') -and $policies.vNets.linkStatus -eq 'Linked') {
+        $vnetPolicyLinked = 'true'
+    }
+}
+else {
+    Write-Warning "Could not read the enterprise policy link state (HTTP $($detailResponse.StatusCode)); assuming not linked."
+}
+
 Write-StepOutput -Name 'environment-id' -Value $environmentId
 Write-StepOutput -Name 'environment-url' -Value $instanceUrl
+Write-StepOutput -Name 'vnet-policy-linked' -Value $vnetPolicyLinked
 Write-StepOutput -Name 'found' -Value 'true'
 
 Write-Host "    resolved '$DisplayName'" -ForegroundColor Green
 Write-Host "    environment id:  $environmentId"
 Write-Host "    instance url:    $instanceUrl"
+Write-Host "    vnet policy:     $($vnetPolicyLinked -eq 'true' ? 'Linked' : 'not linked')"
 
 return [pscustomobject] @{
-    environmentId = $environmentId
-    instanceUrl   = $instanceUrl
+    environmentId    = $environmentId
+    instanceUrl      = $instanceUrl
+    vnetPolicyLinked = ($vnetPolicyLinked -eq 'true')
 }
