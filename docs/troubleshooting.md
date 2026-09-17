@@ -259,7 +259,23 @@ az ad app federated-credential list --id <AZURE_CLIENT_ID> --query "[].{name:nam
 Common mismatches: the workflow runs on a branch other than `main`; the job specifies a GitHub `environment` that has no matching credential; the trigger is a pull request but only a branch credential exists.
 
 ### Cause B — immutable subject claims
-Repositories created after 15 July 2026 receive subjects containing numeric IDs, for example `repo:octo-org@123456/octo-repo@456789:ref:refs/heads/main`. Update the credential to the exact subject the run reports.
+GitHub issues subjects containing immutable numeric IDs, for example
+`repo:octo-org@123456/octo-repo@456789:ref:refs/heads/main`, rather than the name-based
+`repo:octo-org/octo-repo:ref:refs/heads/main`. This is on by default and cannot currently be
+turned off: a `PUT` to `/repos/{owner}/{repo}/actions/oidc/customization/sub` setting
+`use_immutable_subject` to `false` is accepted and then ignored.
+
+`scripts/Initialize-EntraResources.ps1` handles this automatically — it reads the prefix GitHub
+will actually issue and builds the federated credentials from it:
+
+```powershell
+gh api repos/<owner>/<repo>/actions/oidc/customization/sub
+```
+
+If the bootstrap ran without the GitHub CLI available, it falls back to the name-based form and
+warns. Re-run it with `gh` installed and authenticated, and it will correct the existing
+credentials in place. Note that **recreating a repository with the same name changes its numeric
+ID**, which invalidates existing credentials — re-run the bootstrap after doing so.
 
 ### Cause C — missing permission
 The workflow (or job) must declare:

@@ -236,6 +236,63 @@ function Set-FederatedCredential {
     Write-Host "    created federated credential '$Name' -> $Subject" -ForegroundColor Green
 }
 
+function Get-GitHubSubjectPrefix {
+    param([Parameter(Mandatory)][string] $Repository)
+
+    <#
+        GitHub now issues OIDC subject claims that embed immutable numeric IDs:
+
+            repo:owner@44774639/repo@1374170102:environment:demo
+
+        rather than the name-based form:
+
+            repo:owner/repo:environment:demo
+
+        This is enabled by default on repositories and cannot currently be turned off (a PUT
+        setting use_immutable_subject to false is accepted and ignored). A federated identity
+        credential built from the repository NAME therefore never matches, and azure/login
+        fails with AADSTS700213 "No matching federated identity record found".
+
+        So rather than assuming a format, ask GitHub which prefix it will actually issue.
+    #>
+    $default = "repo:$Repository"
+
+    $gh = Get-Command 'gh' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $gh) {
+        Write-Warning "GitHub CLI (gh) not found, so the OIDC subject prefix cannot be read."
+        Write-Warning "Assuming '$default'. If azure/login later fails with AADSTS700213, install"
+        Write-Warning "the GitHub CLI, run 'gh auth login' and re-run this script."
+        return $default
+    }
+
+    try {
+        $raw = & $gh.Source api "repos/$Repository/actions/oidc/customization/sub" 2>$null
+
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
+            Write-Warning "Could not read the OIDC subject configuration for $Repository; assuming '$default'."
+            return $default
+        }
+
+        $config = $raw | ConvertFrom-Json
+
+        if (($config.PSObject.Properties.Name -contains 'sub_claim_prefix') -and
+            -not [string]::IsNullOrWhiteSpace($config.sub_claim_prefix)) {
+
+            if ($config.sub_claim_prefix -ne $default) {
+                Write-Host '    this repository uses immutable OIDC subject claims' -ForegroundColor Yellow
+                Write-Host "    subject prefix: $($config.sub_claim_prefix)"
+            }
+
+            return $config.sub_claim_prefix
+        }
+    }
+    catch {
+        Write-Warning "Could not read the OIDC subject configuration: $($_.Exception.Message)"
+    }
+
+    return $default
+}
+
 function Ensure-ApiScope {
     param(
         [Parameter(Mandatory)][object] $Application,
@@ -430,20 +487,22 @@ Write-Step "Creating the deployment app registration (workload identity federati
 $deploymentApp = New-OrGetApplication -DisplayName $DeploymentAppDisplayName
 $deploymentSp = New-OrGetServicePrincipal -AppId $deploymentApp.appId
 
+$subjectPrefix = Get-GitHubSubjectPrefix -Repository $GitHubRepository
+
 $subjects = [ordered]@{
     "github-branch-$DefaultBranch" = @{
-        Subject     = "repo:${GitHubRepository}:ref:refs/heads/$DefaultBranch"
+        Subject     = "${subjectPrefix}:ref:refs/heads/$DefaultBranch"
         Description = "GitHub Actions on the $DefaultBranch branch of $GitHubRepository"
     }
     'github-pull-request'          = @{
-        Subject     = "repo:${GitHubRepository}:pull_request"
+        Subject     = "${subjectPrefix}:pull_request"
         Description = "GitHub Actions for pull requests in $GitHubRepository (validation only)"
     }
 }
 
 foreach ($environmentName in $Environments) {
     $subjects["github-environment-$environmentName"] = @{
-        Subject     = "repo:${GitHubRepository}:environment:$environmentName"
+        Subject     = "${subjectPrefix}:environment:$environmentName"
         Description = "GitHub Actions in the '$environmentName' environment of $GitHubRepository"
     }
 }
