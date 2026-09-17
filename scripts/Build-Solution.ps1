@@ -54,6 +54,51 @@ $ErrorActionPreference = 'Stop'
 
 function Write-Step { param([string] $Message) Write-Host ''; Write-Host "==> $Message" -ForegroundColor Cyan }
 
+function Resolve-PacCommand {
+    <#
+        The microsoft/powerplatform-actions install action exports the CLI location as
+        POWERPLATFORMTOOLS_PACPATH but does not reliably add it to PATH for later `run:` steps,
+        so calling `pac` bare fails with "The term 'pac' is not recognized". Resolve it
+        explicitly: PATH first, then the action's own hint, which may name either the executable
+        or the directory containing it.
+    #>
+    $onPath = Get-Command 'pac' -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($onPath) { return $onPath.Source }
+
+    $hint = $env:POWERPLATFORMTOOLS_PACPATH
+    if (-not [string]::IsNullOrWhiteSpace($hint)) {
+        if (Test-Path -LiteralPath $hint -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $hint).Path
+        }
+
+        if (Test-Path -LiteralPath $hint -PathType Container) {
+            $candidate = Get-ChildItem -LiteralPath $hint -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -eq 'pac' -or $_.Name -eq 'pac.exe' } |
+                Select-Object -First 1
+            if ($candidate) { return $candidate.FullName }
+        }
+    }
+
+    return $null
+}
+
+$pac = Resolve-PacCommand
+if (-not $pac) {
+    throw @'
+The Power Platform CLI (pac) was not found.
+
+In GitHub Actions, add this before calling the script:
+    - uses: microsoft/powerplatform-actions/actions-install@v1
+
+Locally, install it with:
+    dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+'@
+}
+
+Write-Step 'Locating the Power Platform CLI'
+Write-Host "    using pac at $pac"
+
 $SourcePath = (Resolve-Path $SourcePath).Path
 $canvasAppsDirectory = Join-Path $SourcePath 'CanvasApps'
 
@@ -78,9 +123,20 @@ else {
         New-Item -ItemType Directory -Force -Path $canvasAppsDirectory | Out-Null
         $targetMsapp = Join-Path $canvasAppsDirectory "$($CanvasAppSchemaName)_DocumentUri.msapp"
 
-        $packOutput = & pac canvas pack --sources $CanvasSourcePath --msapp $targetMsapp --layout SourceCode --overwrite 2>&1 | Out-String
+        # A failure here is an expected, handled outcome on a clean clone, so the call must not
+        # be allowed to terminate the script under $ErrorActionPreference = 'Stop'.
+        $packOutput = ''
+        $packExitCode = 1
+        try {
+            $packOutput = & $pac canvas pack --sources $CanvasSourcePath --msapp $targetMsapp --layout SourceCode --overwrite 2>&1 | Out-String
+            $packExitCode = $LASTEXITCODE
+        }
+        catch {
+            $packOutput = $_.Exception.Message
+            $packExitCode = 1
+        }
 
-        if ($LASTEXITCODE -eq 0 -and (Test-Path $targetMsapp)) {
+        if ($packExitCode -eq 0 -and (Test-Path $targetMsapp)) {
             Write-Host '    canvas app packed successfully.' -ForegroundColor Green
         }
         else {
@@ -115,7 +171,7 @@ Write-Step 'Packing the solution'
 $outputDirectory = Split-Path -Parent $OutputPath
 if (-not (Test-Path $outputDirectory)) { New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null }
 
-& pac solution pack --zipfile $OutputPath --folder $SourcePath --packagetype $SolutionType --errorlevel Warning
+& $pac solution pack --zipfile $OutputPath --folder $SourcePath --packagetype $SolutionType --errorlevel Warning
 
 if ($LASTEXITCODE -ne 0) {
     throw "pac solution pack failed with exit code $LASTEXITCODE."
