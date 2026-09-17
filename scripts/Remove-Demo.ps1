@@ -92,7 +92,32 @@ function Write-Step { param([string] $Message) Write-Host ''; Write-Host "==> $M
 
 Write-Step "Inspecting resource group '$ResourceGroupName'"
 
-$resourceGroup = az group show --name $ResourceGroupName --output json 2>$null | ConvertFrom-Json
+# An absent resource group is an expected outcome here, not an error: Destroy has to be safe to
+# re-run against an estate that is already clean. Two separate things make that hard.
+#
+#   * PowerShell 7.4 turns on $PSNativeCommandUseErrorActionPreference by default, so a native
+#     command exiting non-zero THROWS while $ErrorActionPreference is 'Stop'. The probe below
+#     would abort the whole script.
+#   * PowerShell adopts a native command's exit code as its own, so even without the throw a
+#     stale non-zero code leaks out and the run reports failure after doing everything right.
+#
+# Hence the try/catch, the explicit exit-code test, and the reset.
+$resourceGroup = $null
+
+try {
+    $resourceGroupJson = az group show --name $ResourceGroupName --output json 2>$null
+
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($resourceGroupJson)) {
+        $resourceGroup = $resourceGroupJson | ConvertFrom-Json
+    }
+}
+catch {
+    # Absent, or unreadable. Either way there is nothing to delete, and the tag guard below
+    # cannot be satisfied, so treat it as absent.
+    $resourceGroup = $null
+}
+
+$global:LASTEXITCODE = 0
 
 if (-not $resourceGroup) {
     Write-Warning "Resource group '$ResourceGroupName' does not exist. Nothing to delete in Azure."
@@ -270,3 +295,9 @@ Write-Host '    first-party application other solutions in the tenant may depend
 
 Write-Host ''
 Write-Host 'Nothing else was modified.' -ForegroundColor Green
+
+# Reaching here means cleanup succeeded; every real failure above throws. Without this, a stale
+# non-zero $LASTEXITCODE from an expected az probe failure (an absent resource group, an absent
+# app registration) becomes this script's exit code, and a clean run reports as a failed one.
+# Re-running Destroy against an already-empty estate is exactly that case.
+exit 0

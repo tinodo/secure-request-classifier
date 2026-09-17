@@ -417,6 +417,17 @@ Assert-True -Name 'Remove-Demo.ps1 prints what it left behind' `
     -Condition ($removeDemo -match "(?m)^\s*Write-Host 'Left in place:'") `
     -Detail 'The survivors must be visible on every run, not buried in a comment.'
 
+# Destroy has to be safe to re-run against an estate that is already clean. Probing for an absent
+# resource group leaves a non-zero $LASTEXITCODE that PowerShell adopts as the script's own exit
+# code, so a run that did everything right reports failure. It did exactly that once.
+Assert-True -Name 'Remove-Demo.ps1 ends with an explicit exit 0' `
+    -Condition ($removeDemo -match '(?m)^exit 0\s*$') `
+    -Detail 'Otherwise a stale native exit code from an expected probe failure fails the job.'
+
+Assert-True -Name 'Remove-Demo.ps1 tolerates an absent resource group' `
+    -Condition (($removeDemo -match '\$global:LASTEXITCODE = 0') -and ($removeDemo -match '(?s)try\s*\{[^}]*az group show')) `
+    -Detail 'PowerShell 7.4 throws on a failing native command under ErrorActionPreference Stop.'
+
 # ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)
