@@ -234,6 +234,11 @@ sequenceDiagram
 │   └── limitations.md            What cannot be automated, why, with citations
 ├── global.json
 ├── SecureRequestClassifier.slnx
+├── LICENSE                      MIT
+├── SECURITY.md                  How to report a vulnerability, and the CI-enforced invariants
+├── SUPPORT.md                   Where to get help, and what is out of scope
+├── CONTRIBUTING.md              What a change to this repository is expected to do
+├── CODE_OF_CONDUCT.md           Microsoft Open Source Code of Conduct
 └── README.md
 ```
 

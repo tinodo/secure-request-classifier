@@ -431,6 +431,16 @@ Assert-True -Name 'Remove-Demo.ps1 tolerates an absent resource group' `
 # ---------------------------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------------------------
+# Community health files. A public repository is expected to carry these, and SECURITY.md in
+# particular has to exist before anyone can report a vulnerability responsibly.
+# ---------------------------------------------------------------------------------------------
+
+foreach ($file in @('LICENSE', 'SECURITY.md', 'SUPPORT.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md')) {
+    Assert-True -Name "$file exists" `
+        -Condition (Test-Path (Join-Path $RepositoryRoot $file))
+}
+
+# ---------------------------------------------------------------------------------------------
 # The README documents the scripts folder as a tree. It drifts silently as scripts are added,
 # which is how it came to omit several of them. Assert every script is listed.
 # ---------------------------------------------------------------------------------------------
