@@ -221,9 +221,7 @@ jobs:
           POWER_PLATFORM_ENVIRONMENT_ID
           POWER_PLATFORM_ENVIRONMENT_URL
           POWER_PLATFORM_ADMIN_OBJECT_ID
-          POWER_PLATFORM_SECURITY_GROUP_ID
-          POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS
-          POWER_PLATFORM_CONNECTION_ID_OFFICE365'
+          POWER_PLATFORM_SECURITY_GROUP_ID'
           ALLOWED=$(echo "$ALLOWED" | sed 's/^[[:space:]]*//')
 
           referenced=$(grep -rhoE 'secrets\.[A-Za-z_][A-Za-z0-9_]*' .github/workflows \

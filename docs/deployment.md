@@ -131,8 +131,9 @@ Settings → Secrets and variables → Actions → *Secrets*.
 | Secret | Purpose |
 | --- | --- |
 | `POWER_PLATFORM_SECURITY_GROUP_ID` | Restrict environment access to a security group |
-| `POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS` | Connection ID for the connector (see step 5) |
-| `POWER_PLATFORM_CONNECTION_ID_OFFICE365` | Connection ID for Office 365 Outlook |
+
+There are no connection ID secrets. The pipeline never binds connection references — see
+[limitations.md](limitations.md#2-connections-are-created-and-bound-by-a-person-once-per-environment).
 
 You never supply the environment ID or Dataverse URL. Each stage that needs them resolves the
 environment by display name with `scripts/Resolve-PowerPlatformEnvironment.ps1`. They are
@@ -182,32 +183,24 @@ pac admin assign-user `
     --application-user
 ```
 
-### Create the connections
+### Create the connections and turn the flow on
 
-The HTTP with Microsoft Entra ID connection must be created by a person once — see [limitations.md](limitations.md#2-the-connector-connection-must-be-created-once-by-a-person). You can do this before or after the first deployment; the Function App base URL is a deployment output, so after is usually easier.
+Both connections are created by a person, once per environment, directly in the flow. See
+[limitations.md](limitations.md#2-connections-are-created-and-bound-by-a-person-once-per-environment)
+for why this cannot be automated. Do it after the first deployment: the Function App base URL is a
+deployment output.
 
-Once both connections exist:
+1. Open the **Classify and Notify** flow in Power Automate.
+2. On the **Invoke classification API** action, create a new connection:
+   * Connector: **HTTP with Microsoft Entra ID (preauthorized)** — not the v2 connector
+   * *Microsoft Entra ID Resource URI (Application ID URI)*: the `AZURE_API_APP_ID_URI` value
+   * *Base Resource URL*: the Function App base URL
+   * Sign in
+3. On the **Send confirmation email** action, create an **Office 365 Outlook** connection.
+4. Save the flow and turn it on.
 
-```powershell
-pac connection list --environment <environment-url>
-
-gh secret set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
-gh secret set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
-```
-
-Then re-run the Deploy workflow so the solution import binds them.
-
-### Turn the flow on
-
-The solution imports the flow in **Draft**. Nothing in the pipeline activates it, because activation
-only succeeds once both connection references resolve to real connections. After the re-run above:
-
-```powershell
-pac flow enable --environment <environment-url> --flow 8f3a1c22-6d51-4f0b-9c7e-2a4b6d8e1f30
-```
-
-or switch it on from Power Automate. Until then the demo still works — run the flow manually and
-the PowerApps (V2) trigger renders an input form, which exercises the whole private path.
+The pipeline does not bind connection references and does not activate the flow, so every later
+deployment leaves this work intact.
 
 ---
 

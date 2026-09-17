@@ -551,18 +551,20 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-SolutionPackage.ps1
 
+      # Connection references are deliberately NOT bound here. Both connectors use delegated-user
+      # OAuth, so a person creates the connections once in the flow designer and binds them
+      # there. This job runs as the deployment service principal, which has no permission on a
+      # connection owned by a user, so binding fails with ConnectionAuthorizationFailed and
+      # destroys the binding on the way. See docs/limitations.md.
       - name: Render deployment settings
         shell: pwsh
         env:
           FUNCTION_BASE_URL: ${{ needs.infrastructure.outputs.function-base-url }}
           FUNCTION_APPLICATION_ID_URI: ${{ secrets.AZURE_API_APP_ID_URI }}
           ENVIRONMENT_LABEL: ${{ vars.ENVIRONMENT_LABEL || 'Demo' }}
-          CONNECTION_ID_WEBCONTENTS: ${{ secrets.POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS }}
-          CONNECTION_ID_OFFICE365: ${{ secrets.POWER_PLATFORM_CONNECTION_ID_OFFICE365 }}
         run: |
           ./scripts/New-DeploymentSettings.ps1 `
-            -OutputPath ./powerplatform/out/deploymentSettings.json `
-            -AllowMissingConnections
+            -OutputPath ./powerplatform/out/deploymentSettings.json
 
       - name: Import the solution
         # Federation is selected implicitly: app-id and tenant-id are supplied and

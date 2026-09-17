@@ -60,19 +60,46 @@ Microsoft's own CoE Starter Kit commits the `.msapp` binary to source control fo
 
 ---
 
-## 2. The connector connection must be created once by a person
+## 2. Connections are created and bound by a person, once per environment
 
 ### What cannot be automated
 
-Creating the **HTTP with Microsoft Entra ID (preauthorized)** connection that the flow uses, without a human sign-in.
+Creating the two connections the flow uses, and binding them to the solution's connection references:
+
+* **HTTP with Microsoft Entra ID (preauthorized)** — carries the call to the private Function
+* **Office 365 Outlook** — sends the confirmation email
 
 ### Why
 
-The connector's Microsoft Entra ID authentication type is a **delegated user** connection. From the [connector reference](https://learn.microsoft.com/en-us/connectors/webcontents/):
+Both connectors use **delegated user** authentication. From the [connector reference](https://learn.microsoft.com/en-us/connectors/webcontents/):
 
 > This preauthorization empowers the connector to interact with these services using delegated access **on behalf of the user**.
 
-The connection parameters for auth type `EntraAuth` are *Microsoft Entra ID Resource URI (Application ID URI)* and *Base Resource URL*. There is no service-principal option: the only app-identity variant is `CertOauth`, which requires a client certificate **and its password** — that is, a secret, which this demo refuses to introduce.
+Read from the live connector definition, `shared_webcontents` requires a connection parameter `Token` of type `oauthSetting`, with `redirectUrl: https://global.consent.azure-apim.net/redirect/webcontents`. Acquiring that token is an OAuth authorization-code exchange against a signed-in user. Its other two required parameters — *Microsoft Entra ID Resource URI* and *Base Resource URL* — are plain strings and are deployment outputs, so they look automatable, but the token defeats it regardless.
+
+There is no app-only path that this repository will take:
+
+* The `CertOauth` variant needs a client certificate **and its password** — a stored secret, which this demo exists to avoid.
+* The gateway variant needs a `username` and `password` — likewise.
+* `IsOnbehalfofLoginSupported: true` appears in the connector metadata, but [on-behalf-of](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow#client-limitations) requires a user principal; it does not give an app-only service principal a way in.
+* `pac connection create` creates a **Dataverse** connection for the CLI's own auth profiles. It does not create connector API connections.
+
+### Why the pipeline does not bind them either
+
+The deployment settings file deliberately contains **no `ConnectionReferences` section**.
+
+The pipeline imports the solution as the deployment service principal. A connection created by a person is owned by that person, and the service principal has no permission on it, so asking the import to bind it fails:
+
+```
+ConnectionAuthorizationFailed
+The caller with object id '<service-principal>' does not have the minimum required permission
+to perform the requested operation on connection '<id>' under API 'shared_webcontents'
+   at Microsoft.Dynamics.PowerPlatformConnectionReferences.Plugins.PreValidateConnectionReferenceUpdate
+```
+
+Worse, the attempt **destroys a binding that was already working**. Omitting the section means each import leaves the existing bindings alone.
+
+Microsoft does document sharing a connection with a service principal so that it can be bound centrally — see [Share connections with another user so flows can be enabled](https://learn.microsoft.com/en-us/power-apps/maker/data-platform/create-connection-reference#share-connections-with-another-user-so-flows-can-be-enabled). That is a reasonable pattern for a managed ALM pipeline with a dedicated service account. It is **not** used here, because it trades one manual step for a different manual step plus a sharing model to maintain, and this is a demonstration.
 
 ### Why the alternative connectors do not help
 
@@ -87,42 +114,36 @@ The supported-services table in the [VNet support overview](https://learn.micros
 
 Additionally, under VNet support the connector's **Get web resource** action is unsupported, so the flow uses `InvokeHttp` ("Invoke an HTTP request") exclusively.
 
-### Smallest manual action
+### The manual step
 
-Once per Power Platform environment:
+Once per Power Platform environment, after the first deployment:
 
-1. In Power Automate → **Connections** → **New connection** → *HTTP with Microsoft Entra ID (preauthorized)*.
-2. Choose **Log in with Microsoft Entra ID**.
-3. *Microsoft Entra ID Resource URI (Application ID URI)*: the value of the `AZURE_API_APP_ID_URI` secret, for example `api://44444444-…`.
-4. *Base Resource URL*: the Function App base URL, for example `https://func-srclass-demo-ab12cd.azurewebsites.net`.
-5. Sign in.
-6. Read the connection ID and store it as a repository **secret**:
+1. Open the **Classify and Notify** flow in Power Automate.
+2. On the **Invoke classification API** action, create a new connection:
+   * Connector: **HTTP with Microsoft Entra ID (preauthorized)** — not the v2 connector
+   * *Microsoft Entra ID Resource URI (Application ID URI)*: the `AZURE_API_APP_ID_URI` value, for example `api://44444444-…`
+   * *Base Resource URL*: the Function App base URL, for example `https://func-srclass-demo-ab12cd.azurewebsites.net`
+   * Sign in
+3. On the **Send confirmation email** action, create an **Office 365 Outlook** connection.
+4. Save the flow and turn it on.
 
-   ```powershell
-   pac connection list --environment <environment-url>
-   gh secret set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
-   gh secret set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
-   ```
+`scripts/Initialize-EntraResources.ps1` has already created the `oauth2PermissionGrant` that lets step 2 complete without a consent prompt.
 
-   A connection ID is **not a credential** — holding one grants nothing without permission on the
-   environment. It is stored as a secret for the same reason as every other identifier here
-   (`AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `POWER_PLATFORM_APP_ID` and the rest): GitHub
-   masks secrets in Actions logs, and on a public repository those logs are world-readable. The
-   convention in this repository is therefore:
-
-   | Kind | Where | Why |
-   | --- | --- | --- |
-   | Credentials | **nowhere** | Deployment is GitHub OIDC only. None exist to store |
-   | Identifiers that reveal tenant, subscription or environment topology | repository **secrets** | So they are masked in public run logs |
-   | Non-identifying configuration — region, labels, feature switches | repository **variables** | Harmless in a log, and useful to see there |
-
-   So "no secrets in this repository" means no *credentials*, and nothing sensitive committed to
-   git. It does not mean the workflows use no GitHub Actions secrets: all ten of them are
-   identifiers.
-
-CI then binds the existing connection through the deployment settings file. `scripts/Initialize-EntraResources.ps1` has already created the `oauth2PermissionGrant` that makes step 5 succeed without a consent prompt.
+Every later deployment updates the flow, the environment variables and the infrastructure, and leaves those connections bound.
 
 > Changing preauthorizations can take up to an hour to affect connections that already existed. New connections pick the change up immediately. — connector reference, Known Issues
+
+### A note on "no secrets"
+
+Microsoft defines a connection as a *stored authentication credential*, so a delegated connection is itself a credential — held by Power Platform, created by a human, never seen by this repository. The accurate claim is: **this repository stores no credentials, and its pipeline holds none.** Deployment authenticates only through GitHub OIDC workload identity federation.
+
+The GitHub Actions secrets the workflows do use are all **identifiers** — subscription, tenant, application and object IDs. They are secrets so GitHub masks them in run logs, which are world-readable on a public repository:
+
+| Kind | Where | Why |
+| --- | --- | --- |
+| Credentials | **nowhere** | Deployment is GitHub OIDC only. None exist to store |
+| Identifiers that reveal tenant, subscription or environment topology | repository **secrets** | So they are masked in public run logs |
+| Non-identifying configuration — region, labels, feature switches | repository **variables** | Harmless in a log, and useful to see there |
 
 ---
 
