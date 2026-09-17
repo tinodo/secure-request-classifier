@@ -4,11 +4,11 @@ This document explains every networking decision in the demo and why it is not o
 
 ## The three subnets
 
-| Subnet | Network | Delegated to | Size in the demo | Why |
-| --- | --- | --- | --- | --- |
-| `snet-powerplatform` | primary **and** failover | `Microsoft.PowerPlatform/enterprisePolicies` | `/24` | Where Power Platform runs the connector containers |
-| `snet-functions` | primary only | `Microsoft.App/environments` | `/26` | Function App outbound virtual network integration |
-| `snet-private-endpoints` | primary only | *(none)* | `/27` | Private endpoints for the Function App and storage |
+| Subnet | Network | Delegated to | NSG | Size in the demo | Why |
+| --- | --- | --- | --- | --- | --- |
+| `snet-powerplatform` | primary **and** failover | `Microsoft.PowerPlatform/enterprisePolicies` | yes | `/24` | Where Power Platform runs the connector containers |
+| `snet-functions` | primary only | `Microsoft.App/environments` | yes | `/26` | Function App outbound virtual network integration |
+| `snet-private-endpoints` | primary only | *(none)* | yes | `/27` | Private endpoints for the Function App and storage |
 
 These cannot be merged. Three separate reasons:
 
@@ -28,6 +28,48 @@ Two constraints worth knowing before you pick a range:
 For `snet-functions`, Flex Consumption requires a minimum of `/27`; `/26` is recommended when scaling beyond a single app.
 
 Subnet names must not contain underscores — an Azure Functions virtual network integration requirement.
+
+## Network security groups
+
+Every subnet carries a network security group. This is not optional hardening — it is a hard
+requirement in most governed subscriptions.
+
+Azure Landing Zones assign **`Deny-Subnet-Without-Nsg`** at the `landingzones` management group.
+It is a `Deny` effect, and it evaluates the whole virtual network resource, so a template that
+creates any subnet without an NSG fails outright:
+
+```
+RequestDisallowedByPolicy: Resource 'vnet-...' was disallowed by policy.
+Reasons: 'Subnets {enforcementMode} have a Network Security Group.'
+policyDefinitionName: Deny-Subnet-Without-Nsg
+```
+
+This was found by validating this exact template against a real ALZ-governed subscription, not
+by reading the policy catalogue.
+
+The rules in `infra/modules/network-security-group.bicep` are deliberately **explicit rather
+than restrictive**:
+
+| Subnet role | Direction | Rule |
+| --- | --- | --- |
+| `powerPlatform` | Outbound | HTTPS to `VirtualNetwork` (reaches the private endpoints) |
+| `powerPlatform` | Outbound | HTTPS to `AzureCloud` (Power Platform control plane) |
+| `functions` | Outbound | HTTPS to `VirtualNetwork` (storage private endpoints) |
+| `functions` | Outbound | HTTPS to `AzureCloud` (Azure Monitor ingestion) |
+| `privateEndpoints` | Inbound | HTTPS from the virtual network address space |
+
+No blanket deny rule is added. Azure's default rules already permit intra-VNet traffic and
+outbound internet access, and Microsoft states that Power Platform containers in a delegated
+subnet require outbound connectivity. Adding a deny-all would satisfy the policy and then break
+the demo in a way that is genuinely tedious to diagnose — the connector would fail with a
+timeout rather than a clear error.
+
+NSGs on a delegated subnet are explicitly supported. From the Power Platform virtual network
+whitepaper: *"Customers can associate NSGs with the delegated subnet. Define and enforce
+security rules to control inbound and outbound traffic to and from the subnet."*
+
+To restrict egress further, attach a NAT gateway or a route table to `snet-powerplatform`. Note
+that NSGs alone do not change the egress path — see "Egress from the delegated subnet" below.
 
 ## Region pairing
 
@@ -121,7 +163,15 @@ By default, containers in the delegated subnet have unrestricted outbound intern
 > If only configuring network security groups, without configuring the next hop (that is, attaching a NAT Gateway or adding a custom routing table) traffic is restricted according to the rules specified. However, internet-bound traffic will still egress from Power Platform owned IP addresses.
 > — [Power Platform virtual network support whitepaper](https://learn.microsoft.com/en-us/power-platform/admin/virtual-network-support-whitepaper)
 
-This demo deliberately does **not** attach a NAT gateway, route table or network security group. Adding one would be a legitimate hardening step but would also make the demo's failure modes harder to explain, and the requirement here was an isolated workload that coexists with governance rather than one that reimplements it. The subnets are ordinary and will accept whatever an Azure Landing Zone policy attaches to them.
+This demo attaches a network security group to **every** subnet, because Azure Landing Zones
+assign `Deny-Subnet-Without-Nsg` as a `Deny` effect and the deployment simply fails without one
+(see "Network security groups" above). The rules are explicit but permissive: they document the
+flows the demo uses without overriding Azure's defaults.
+
+It deliberately does **not** attach a NAT gateway or route table. Adding one would be a
+legitimate hardening step but would also make the demo's failure modes harder to explain, and
+the requirement here was an isolated workload that coexists with governance rather than one that
+reimplements it.
 
 ## TLS
 

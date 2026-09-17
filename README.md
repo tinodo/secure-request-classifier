@@ -190,6 +190,7 @@ sequenceDiagram
 │   ├── modules/
 │   │   ├── virtual-network.bicep
 │   │   ├── virtual-network-peering.bicep
+│   │   ├── network-security-group.bicep
 │   │   ├── private-dns-zone.bicep
 │   │   ├── private-endpoint.bicep
 │   │   ├── storage.bicep
@@ -339,6 +340,9 @@ Details, including exactly what each grant permits, are in [docs/identity-model.
 | `snet-powerplatform` | primary **and** failover | `Microsoft.PowerPlatform/enterprisePolicies` | Where Power Platform connector containers run |
 | `snet-functions` | primary | `Microsoft.App/environments` | Function App outbound VNet integration |
 | `snet-private-endpoints` | primary | none | Private endpoints for the Function App and storage |
+
+Every subnet carries a network security group — Azure Landing Zones assign
+`Deny-Subnet-Without-Nsg` as a `Deny` effect, so a subnet without one simply cannot be created.
 
 Key points, each explained in [docs/networking-model.md](docs/networking-model.md):
 

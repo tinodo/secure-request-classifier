@@ -23,6 +23,7 @@ A component-by-component walkthrough of what is deployed, why each piece exists,
 | Private DNS zones (×4) | `Microsoft.Network/privateDnsZones` | Resolve `azurewebsites.net` and storage names to private addresses |
 | DNS zone links (×8) | `.../virtualNetworkLinks` | Each zone linked to **both** networks |
 | Private endpoints (×4) | `Microsoft.Network/privateEndpoints` | `sites`, `blob`, `queue`, `table` |
+| Network security groups (×4) | `Microsoft.Network/networkSecurityGroups` | One per subnet. Required: Azure Landing Zones deny subnets without one |
 | Storage account | `Microsoft.Storage/storageAccounts` | Functions host storage + the Flex Consumption deployment container |
 | Log Analytics workspace | `Microsoft.OperationalInsights/workspaces` | Telemetry backing store |
 | Application Insights | `Microsoft.Insights/components` | Function telemetry, local auth disabled |

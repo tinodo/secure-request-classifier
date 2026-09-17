@@ -236,6 +236,18 @@ foreach ($subnet in @('snet-powerplatform', 'snet-functions', 'snet-private-endp
     Assert-True -Name "Subnet name defined in Bicep: $subnet" -Condition ($networkBicep -match $subnet)
 }
 
+# Azure Landing Zones deny subnets without a network security group, so every subnet variant in
+# the network module must attach one.
+Assert-True -Name 'Every subnet variant attaches a network security group' `
+    -Condition (([regex]::Matches($networkBicep, 'networkSecurityGroup:')).Count -ge 3) `
+    -Detail 'Required by the ALZ Deny-Subnet-Without-Nsg policy.'
+
+Assert-True -Name 'A network security group module exists' `
+    -Condition (Test-Path (Join-Path $RepositoryRoot 'infra/modules/network-security-group.bicep'))
+
+Assert-True -Name 'Test-Deployment asserts every subnet has a network security group' `
+    -Condition ($testScript -match 'network security group')
+
 Assert-True -Name 'Test-Deployment checks the Power Platform delegated subnet by name' `
     -Condition ($testScript -match 'snet-powerplatform')
 

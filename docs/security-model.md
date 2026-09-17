@@ -212,6 +212,7 @@ The demo is designed to deploy into a governed subscription without fighting it.
 
 | ALZ policy | Effect on this demo | Mitigation |
 | --- | --- | --- |
+| `Deny-Subnet-Without-Nsg` | **Blocks the deployment outright** — verified against a real ALZ subscription | Handled: every subnet ships with an NSG |
 | `Deny-Public-Endpoints` | Blocks the transient deployment window | Set `FUNCTION_DEPLOY_MODE=private-runner` |
 | `Deploy-Private-DNS-Zones` (DeployIfNotExists) | Wants to own DNS integration centrally | Set `CREATE_PRIVATE_DNS_ZONE_GROUPS=false`, and `CREATE_PRIVATE_DNS_ZONES=false` if the hub zones already exist |
 | `Audit-PeDnsZones` | Audits workload-owned zones | Audit only by default; no action needed |

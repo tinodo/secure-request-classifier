@@ -177,11 +177,22 @@ The reasoning and the Microsoft citation are in [limitations.md](limitations.md#
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
+| `RequestDisallowedByPolicy: Subnets ... have a Network Security Group` | `Deny-Subnet-Without-Nsg` is assigned at the `landingzones` management group | Already handled — every subnet ships with an NSG. If you removed them, put them back |
 | Private endpoint deploys but DNS does not resolve | An ALZ DeployIfNotExists policy owns DNS integration and your zone group pre-empted it | `CREATE_PRIVATE_DNS_ZONE_GROUPS=false` |
 | Creating the private DNS zone is denied | `Audit-PeDnsZones` has been switched from Audit to Deny | `CREATE_PRIVATE_DNS_ZONES=false` and link the hub zones to both VNets |
 | Deployment window fails with a policy error | `Deny-Public-Endpoints` | `FUNCTION_DEPLOY_MODE=private-runner` |
 | Resource creation denied for missing tags | Required-tags policy | Add them to the `tags` parameter in `demo.bicepparam` |
 | Subnets lose default outbound access | `Enforce-Subnet-Private` | Attach a NAT gateway to `snet-powerplatform` |
+
+**Always dry-run before deploying into a governed subscription.** Policy failures surface in
+seconds and name the exact policy definition:
+
+```bash
+az deployment sub validate \
+  --location westeurope \
+  --template-file infra/main.bicep \
+  --parameters infra/parameters/demo.bicepparam
+```
 
 Microsoft's guidance when a DeployIfNotExists policy manages private DNS: *"You can still create private endpoints in your infrastructure as code tooling. But if you use the DeployIfNotExists policy approach in this article, you shouldn't integrate DNS in your code."* ([Private Link and DNS integration at scale](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/private-link-and-dns-integration-at-scale))
 

@@ -45,12 +45,50 @@ var privateEndpointSubnetName = 'snet-private-endpoints'
 var deployFunctionSubnet = !empty(functionSubnetPrefix)
 var deployPrivateEndpointSubnet = !empty(privateEndpointSubnetPrefix)
 
+// Azure Landing Zones commonly assign `Deny-Subnet-Without-Nsg`, which refuses to create a
+// subnet that has no network security group. Every subnet below therefore gets one.
+module powerPlatformNsg 'network-security-group.bicep' = {
+  name: '${virtualNetworkName}-nsg-powerplatform'
+  params: {
+    networkSecurityGroupName: 'nsg-${virtualNetworkName}-powerplatform'
+    location: location
+    subnetRole: 'powerPlatform'
+    virtualNetworkAddressPrefix: addressPrefix
+    tags: tags
+  }
+}
+
+module functionNsg 'network-security-group.bicep' = if (deployFunctionSubnet) {
+  name: '${virtualNetworkName}-nsg-functions'
+  params: {
+    networkSecurityGroupName: 'nsg-${virtualNetworkName}-functions'
+    location: location
+    subnetRole: 'functions'
+    virtualNetworkAddressPrefix: addressPrefix
+    tags: tags
+  }
+}
+
+module privateEndpointNsg 'network-security-group.bicep' = if (deployPrivateEndpointSubnet) {
+  name: '${virtualNetworkName}-nsg-private-endpoints'
+  params: {
+    networkSecurityGroupName: 'nsg-${virtualNetworkName}-private-endpoints'
+    location: location
+    subnetRole: 'privateEndpoints'
+    virtualNetworkAddressPrefix: addressPrefix
+    tags: tags
+  }
+}
+
 // The delegated subnet is dedicated to Power Platform: no other resource, and no other
 // delegation, may share it. The delegation name and serviceName are the same string.
 var powerPlatformSubnet = {
   name: powerPlatformSubnetName
   properties: {
     addressPrefix: powerPlatformSubnetPrefix
+    networkSecurityGroup: {
+      id: powerPlatformNsg.outputs.networkSecurityGroupId
+    }
     delegations: [
       {
         name: 'Microsoft.PowerPlatform/enterprisePolicies'
@@ -60,8 +98,8 @@ var powerPlatformSubnet = {
       }
     ]
     // Power Platform containers must be able to reach the private endpoints in the peered
-    // network, so default outbound routing is left in place. Restricting egress further
-    // (NAT gateway / UDR) is a customer-owned concern and out of scope for this demo.
+    // network. The network security group documents that flow explicitly and leaves Azure's
+    // default outbound rules in place beneath it.
     privateEndpointNetworkPolicies: 'Enabled'
     privateLinkServiceNetworkPolicies: 'Enabled'
   }
@@ -74,6 +112,9 @@ var functionSubnet = {
   name: functionSubnetName
   properties: {
     addressPrefix: functionSubnetPrefix
+    networkSecurityGroup: deployFunctionSubnet ? {
+      id: functionNsg!.outputs.networkSecurityGroupId
+    } : null
     delegations: [
       {
         name: 'Microsoft.App/environments'
@@ -92,6 +133,9 @@ var privateEndpointSubnet = {
   name: privateEndpointSubnetName
   properties: {
     addressPrefix: privateEndpointSubnetPrefix
+    networkSecurityGroup: deployPrivateEndpointSubnet ? {
+      id: privateEndpointNsg!.outputs.networkSecurityGroupId
+    } : null
     privateEndpointNetworkPolicies: 'Disabled'
     privateLinkServiceNetworkPolicies: 'Disabled'
   }

@@ -416,6 +416,26 @@ else {
         }
     }
 
+    # Azure Landing Zones assign Deny-Subnet-Without-Nsg as a Deny effect, so a missing network
+    # security group is not a hardening gap - it means the subnet could not have been created.
+    $subnetsWithoutNsg = @()
+    foreach ($vnet in $virtualNetworks) {
+        foreach ($subnet in $vnet.subnets) {
+            if (-not $subnet.networkSecurityGroup) {
+                $subnetsWithoutNsg += "$($vnet.name)/$($subnet.name)"
+            }
+        }
+    }
+
+    if ($subnetsWithoutNsg.Count -eq 0) {
+        Add-Result -Name 'Every subnet has a network security group' -Status 'Pass' `
+            -Detail 'Satisfies the Azure Landing Zone Deny-Subnet-Without-Nsg policy.'
+    }
+    else {
+        Add-Result -Name 'Every subnet has a network security group' -Status 'Fail' `
+            -Detail "Missing on: $($subnetsWithoutNsg -join ', ')"
+    }
+
     if ($vnetCount -gt 1) {
         if ($delegatedSubnets -ge 2) {
             Add-Result -Name 'Delegated subnets exist in both regions of the Power Platform region pair' -Status 'Pass' `
