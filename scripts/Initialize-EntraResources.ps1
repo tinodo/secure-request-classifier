@@ -95,15 +95,32 @@ function Invoke-Graph {
     )
 
     $arguments = @('rest', '--method', $Method.ToLowerInvariant(), '--uri', $Uri)
+    $bodyFile = $null
 
     if ($null -ne $Body) {
-        $json = $Body | ConvertTo-Json -Depth 20 -Compress
-        $arguments += @('--headers', 'Content-Type=application/json', '--body', $json)
+        # Pass the payload via a file rather than inline. Inline JSON is mangled by the shell's
+        # argument parsing on Windows, which Microsoft Graph rejects with
+        # "Unable to read JSON request payload".
+        $bodyFile = [System.IO.Path]::GetTempFileName()
+        $json = $Body | ConvertTo-Json -Depth 20
+
+        # Azure CLI reads @file as UTF-8 and chokes on a byte order mark.
+        [System.IO.File]::WriteAllText($bodyFile, $json, (New-Object System.Text.UTF8Encoding($false)))
+
+        $arguments += @('--headers', 'Content-Type=application/json', '--body', "@$bodyFile")
     }
 
-    $raw = & az @arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Microsoft Graph $Method $Uri failed: $raw"
+    try {
+        $raw = & az @arguments 2>&1
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Graph $Method $Uri failed: $raw"
+        }
+    }
+    finally {
+        if ($bodyFile -and (Test-Path $bodyFile)) {
+            Remove-Item $bodyFile -Force -ErrorAction SilentlyContinue
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace(($raw | Out-String).Trim())) { return $null }
