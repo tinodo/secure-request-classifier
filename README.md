@@ -10,7 +10,7 @@ Everything is in this repository: the Azure infrastructure, the application code
 
 | Claim | How this repository proves it |
 | --- | --- |
-| A Power App and cloud flow can reach a backend that has **no public endpoint** | The Function App ships with `publicNetworkAccess: Disabled`; the flow reaches it through the Power Platform delegated subnet and a private endpoint |
+| A cloud flow can reach a backend that has **no public endpoint** | The Function App ships with `publicNetworkAccess: Disabled`; the flow reaches it through the Power Platform delegated subnet and a private endpoint |
 | Power Platform traffic can be pinned into **your** virtual network | A `Microsoft.PowerPlatform/enterprisePolicies` network-injection policy binds delegated subnets in both Azure regions of the Power Platform region pair |
 | Backend authentication needs **no shared secret** | App Service Authentication validates Microsoft Entra ID tokens; no client secret, no Function key, no SAS token |
 | Azure access needs **no stored credential** | GitHub OIDC / workload identity federation for both Azure **and** Power Platform. A CI job fails the build if any workflow references a stored credential; only non-credential identifiers are allow-listed |
@@ -23,14 +23,20 @@ Everything is in this repository: the Azure infrastructure, the application code
 
 An employee submits a simple internal request — a broken laptop, a meeting-room problem, an HR question. The organisation wants that request triaged consistently, and wants the triage logic to live in Azure on a service that is **not reachable from the internet**.
 
-1. The employee fills in a short form in the **Secure Request Classifier** Power App.
-2. The app calls a **solution-aware Power Automate cloud flow**.
-3. The flow calls an **HTTP-triggered Azure Function** over private networking.
-4. The Function validates and normalises the request, generates a request ID, derives a priority, assigns a responsible team and calculates a response target — using plain deterministic rules, no AI.
-5. The flow emails the requester through **Office 365 Outlook**.
-6. The result is returned to the app and displayed.
+1. The employee fills in a short form. The **Classify and Notify** cloud flow uses a PowerApps (V2) trigger, which renders that form when the flow is run from Power Automate.
+2. The flow calls an **HTTP-triggered Azure Function** over private networking.
+3. The Function validates and normalises the request, generates a request ID, derives a priority, assigns a responsible team and calculates a response target — using plain deterministic rules, no AI.
+4. The flow emails the requester through **Office 365 Outlook**.
+5. The classification is returned to the caller.
 
 The application logic is deliberately small. The interesting part is the network path and the identity model.
+
+> **There is no canvas app in this repository's deployment.** `pac canvas pack` is deprecated and
+> refuses to build an `.msapp` from YAML that has not been opened in Power Apps Studio, so no app
+> binary can be produced in CI. The flow's PowerApps (V2) trigger renders the same typed input
+> form and exercises the identical network path, which is what the demonstration is about. Power
+> Fx source for an optional canvas front end is committed under `powerplatform/canvas-app/src/`;
+> see [docs/limitations.md](docs/limitations.md#1-there-is-no-canvas-app-and-one-cannot-be-built-in-ci).
 
 ---
 
@@ -43,8 +49,7 @@ flowchart TB
     end
 
     subgraph pp["Power Platform environment (Managed Environment)"]
-        APP["Power App<br/>Secure Request Classifier"]
-        FLOW["Cloud flow<br/>Classify and Notify"]
+        FLOW["Cloud flow<br/>Classify and Notify<br/>(PowerApps V2 trigger)"]
         CONN["Connector:<br/>HTTP with Microsoft Entra ID<br/>(preauthorized)"]
         O365["Office 365 Outlook<br/>connector"]
     end
@@ -101,7 +106,6 @@ flowchart TB
 sequenceDiagram
     autonumber
     actor User
-    participant App as Power App
     participant Flow as Power Automate<br/>cloud flow
     participant Subnet as Delegated subnet<br/>(Power Platform VNet support)
     participant DNS as Azure Private DNS<br/>privatelink.azurewebsites.net
@@ -110,8 +114,7 @@ sequenceDiagram
     participant Outlook as Office 365 Outlook
     participant Mail as Requester mailbox
 
-    User->>App: Fill in the form, select Submit
-    App->>Flow: Run(name, email, title, category, impact, description)
+    User->>Flow: Run the flow, fill in the trigger form
     Flow->>Flow: Generate correlation id, compose JSON payload
     Flow->>Subnet: InvokeHttp via "HTTP with Microsoft Entra ID (preauthorized)"
     Note over Subnet: Connector runs in a container<br/>inside YOUR delegated subnet
@@ -127,8 +130,7 @@ sequenceDiagram
     Flow->>Flow: Parse JSON
     Flow->>Outlook: Send email (request id, priority, team, target)
     Outlook->>Mail: Confirmation email
-    Flow-->>App: Respond to a Power App
-    App-->>User: Show request id, priority, assigned team, response target
+    Flow-->>User: Request id, priority, assigned team, response target
 
     rect rgba(255, 220, 220, 0.5)
         Note over User,Func: A request from the public internet to the same host<br/>never reaches the Function App at all.
@@ -396,13 +398,12 @@ A CI job (`security-invariants`) fails the build if any of these regress. See [d
 
 ## How to run the demo
 
-1. Open the **Secure Request Classifier** app in Power Apps.
-2. Enter a requester name and email, a title, pick a category and impact, add a description.
-3. Select **Submit**.
-4. The app shows the request ID, priority, assigned team and response target.
-5. The requester receives the confirmation email.
-
-If the canvas app has not been imported yet, run the **Classify and Notify** flow directly from Power Automate — the PowerApps (V2) trigger renders the same input form and exercises the identical network path.
+1. In [Power Automate](https://make.powerautomate.com), open the **Classify and Notify** flow.
+2. Select **Test** → **Manually** → **Test**. The PowerApps (V2) trigger renders a typed input form.
+3. Enter a requester name and email, a title, pick a category and impact, add a description.
+4. Select **Run flow**.
+5. The run detail shows the request ID, priority, assigned team and response target returned by the Function — over the private network path.
+6. The requester receives the confirmation email.
 
 The presenter's script, with talking points for each stage, is in **[docs/demo-script.md](docs/demo-script.md)**.
 
@@ -488,11 +489,11 @@ Two guards stop it being aimed at the wrong thing: the resource group must be ta
 
 Fully documented, with citations, in **[docs/limitations.md](docs/limitations.md)**. Summary:
 
-1. **The canvas app binary cannot be built from source in CI.** `pac canvas pack` is deprecated and refuses to pack YAML that has not been validated by opening the app once in Power Apps Studio. The app's Power Fx source is committed; the one-time action that produces the `.msapp` is documented. The flow — and therefore the entire private-networking demonstration — deploys and runs without it.
-2. **The connector connection must be created once by a person.** The `EntraAuth` connection type on the "HTTP with Microsoft Entra ID (preauthorized)" connector is a delegated-user connection with no service-principal option. CI binds the existing connection by ID.
+1. **There is no canvas app, and one cannot be built in CI.** `pac canvas pack` is deprecated and refuses to pack YAML that has not been opened once in Power Apps Studio, so no `.msapp` can be produced by the pipeline. The flow's PowerApps (V2) trigger renders the same typed input form and exercises the identical network path, so the demonstration is complete without it. Power Fx source for an optional front end is committed.
+2. **The two connections are created and bound by a person, once per environment.** Both connectors use delegated-user OAuth, so there is no service-principal path that does not introduce a stored secret. The pipeline deliberately never binds connection references: it runs as a service principal that has no permission on a user's connection, and attempting it destroys the binding.
 3. **Linking the enterprise policy to an environment is not an ARM operation.** It is automated here using Microsoft's `Enable-SubnetInjection` cmdlet, with a documented REST fallback.
 4. **Deploying code to a function app with public access disabled needs a network-connected runner.** Microsoft documents this explicitly. The default mode opens a transient, single-IP-restricted deployment window and re-seals it; `private-runner` mode avoids it entirely.
-5. **Managed Environments and an associated Azure subscription are prerequisites** that must exist before this repository can deploy anything.
+5. **An associated Azure subscription is a tenant prerequisite** that must exist before this repository can deploy anything. Managed Environments is handled automatically by the environment provisioning script.
 
 ---
 

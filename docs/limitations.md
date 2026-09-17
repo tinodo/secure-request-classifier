@@ -6,11 +6,17 @@ Nothing here is papered over with a secret, and nothing here blocks the security
 
 ---
 
-## 1. The canvas app `.msapp` cannot be built from source in CI
+## 1. There is no canvas app, and one cannot be built in CI
+
+### What this means for the deployment
+
+**Nothing this repository deploys includes a Power App.** The solution contains a cloud flow, two connection references and four environment variables — no app. Do not go looking for one in the maker portal after deploying; it is not there.
+
+The flow's **PowerApps (V2) trigger** renders a typed input form when the flow is run from Power Automate, so the demonstration has a working front end and the complete private-network path from the first deployment.
 
 ### What cannot be automated
 
-Producing the binary `.msapp` for the Power App from the committed Power Fx YAML source, inside a GitHub Actions job, with no prior human interaction.
+Producing the binary `.msapp` for an optional canvas front end from the committed Power Fx YAML source, inside a GitHub Actions job, with no prior human interaction.
 
 ### Why
 
