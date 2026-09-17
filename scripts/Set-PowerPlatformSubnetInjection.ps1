@@ -218,7 +218,29 @@ $token = Get-PowerPlatformAccessToken
 $environmentUri = "$($script:BapEndpoint)providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$EnvironmentId`?api-version=2016-11-01"
 $environment = Invoke-RestMethod -Uri $environmentUri -Method Get -Headers @{ Authorization = "Bearer $token" }
 
-$linked = $environment.properties.enterprisePolicies.VNets.id
+$linked = $null
+
+# After a successful unlink the 'enterprisePolicies' property is not merely empty, it is absent
+# from the response entirely. Under Set-StrictMode, walking into it then throws, which turned a
+# SUCCESSFUL unlink into "Unlink failed: The property 'enterprisePolicies' cannot be found on
+# this object" and told the operator to go and unlink by hand.
+#
+# PSObject.Properties['name'] returns $null for a missing property instead of throwing, and
+# unlike .Properties.Name it is also safe on an object with no properties at all.
+function Get-PropertyOrNull {
+    param($InputObject, [string] $Name)
+
+    if ($null -eq $InputObject) { return $null }
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+
+    return $property.Value
+}
+
+$policies = Get-PropertyOrNull -InputObject $environment.properties -Name 'enterprisePolicies'
+$vnets = Get-PropertyOrNull -InputObject $policies -Name 'VNets'
+$linked = Get-PropertyOrNull -InputObject $vnets -Name 'id'
 
 if ($Action -eq 'Link') {
     if ($linked) {
