@@ -442,14 +442,28 @@ pwsh ./scripts/Remove-Demo.ps1 `
 
 or run the **Destroy** workflow and type `DESTROY` to confirm.
 
-This removes both of the things the Deploy workflow creates:
+This removes everything the **Deploy** workflow creates:
 
-| Item | Removed by default |
-| --- | --- |
-| Resource group `rg-srclass-demo` and everything in it | Yes, and it waits for the deletion to finish |
-| Power Platform environment, its Dataverse database and the solution | Yes — pass `-KeepPowerPlatformEnvironment` to keep it |
-| The two Entra app registrations from `Initialize-EntraResources.ps1` | Yes — pass `-KeepEntraApplications` to keep them. Deleting them removes the identity the pipelines sign in with, so re-run the bootstrap and reset the repository secrets before deploying again |
-| The `HTTP with Microsoft Entra ID` connector service principal and its grant | No — shared, tenant-wide Microsoft first-party application, not ours to delete |
+| Item | Removed by default | Notes |
+| --- | --- | --- |
+| Resource group `rg-srclass-demo` and everything in it | **Yes** | Waits for the deletion to finish, so a green run means it is actually gone |
+| Power Platform environment, its Dataverse database and the solution | **Yes** | `-KeepPowerPlatformEnvironment` keeps it |
+| The two Entra app registrations | **No** | Created by the *bootstrap*, not by a deployment — see below |
+| The `HTTP with Microsoft Entra ID` connector service principal and its grant | **Never** | Shared, tenant-wide Microsoft first-party application. Not ours to delete |
+
+### Why the app registrations survive
+
+They are created once by `scripts/Initialize-EntraResources.ps1`, which is a bootstrap step, not part of a deployment. The deployment one is the identity the pipelines sign in with, so deleting it means re-running the bootstrap and re-setting every repository secret before you can deploy again.
+
+Deploy runs happily against the same pair any number of times, so keeping them costs nothing and blocks nothing. If you do want a bare tenant:
+
+```powershell
+pwsh ./scripts/Remove-Demo.ps1 -ResourceGroupName rg-srclass-demo -RemoveEntraApplications
+```
+
+or tick `remove-entra-applications` on the Destroy workflow. Expect to re-run the bootstrap afterwards.
+
+Every run prints a **Left in place** list, and the workflow summary states which of the above applied, so the boundary is never implied.
 
 Order matters, and the script enforces it: the environment is unlinked from the enterprise policy first, then deleted, and only then is the resource group removed — otherwise the delegated subnet can still be held and the virtual network refuses to delete.
 

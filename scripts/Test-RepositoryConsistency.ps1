@@ -396,15 +396,26 @@ Assert-True -Name 'Environment deletion is guarded by the expected display name'
     -Condition ($removeDemo -match 'PowerPlatformEnvironmentName') `
     -Detail 'Provisioning adopts an existing environment, so deletion must confirm which one it is.'
 
-# The bootstrap creates the two app registrations, so Destroy removes them by default too.
-# Opting out is a switch named for what it does; the default must not quietly become "keep".
-Assert-True -Name 'Destroy deletes the Entra app registrations by default' `
-    -Condition ($destroyWorkflow -match '(?s)remove-entra-applications:.*?default:\s*true') `
-    -Detail 'Destroy should remove what the bootstrap created unless explicitly told not to.'
+# The Entra app registrations are created by the BOOTSTRAP, not by a deployment, and the
+# deployment one is the identity the pipelines sign in with, so Destroy keeps them by default.
+# That is a defensible choice; claiming to remove "everything" while doing it is not. Assert the
+# opt-out exists and that no script in the destroy path makes the false totality claim that hid
+# the missing environment delete for so long.
+Assert-True -Name 'Destroy can delete the Entra app registrations on request' `
+    -Condition (($destroyWorkflow -match 'remove-entra-applications') -and ($removeDemo -match '\$RemoveEntraApplications')) `
+    -Detail 'Keeping them by default is fine; having no way to remove them is not.'
 
-Assert-True -Name 'Remove-Demo.ps1 deletes the Entra apps unless told to keep them' `
-    -Condition ($removeDemo -match 'if \(-not \$KeepEntraApplications\)') `
-    -Detail 'The script default must match the workflow default.'
+foreach ($file in @('.github/workflows/destroy.yml', 'scripts/Remove-Demo.ps1')) {
+    $text = Get-FileText $file
+
+    Assert-True -Name "$file does not claim to remove everything" `
+        -Condition ($text -notmatch '(?i)removes everything the demo created, and nothing else') `
+        -Detail 'It keeps the bootstrap app registrations and the connector service principal. Say so.'
+}
+
+Assert-True -Name 'Remove-Demo.ps1 prints what it left behind' `
+    -Condition ($removeDemo -match "(?m)^\s*Write-Host 'Left in place:'") `
+    -Detail 'The survivors must be visible on every run, not buried in a comment.'
 
 # ---------------------------------------------------------------------------------------------
 

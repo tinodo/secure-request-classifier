@@ -13,15 +13,21 @@
          imported solution.
       3. Delete the Azure resource group, and wait for it.
 
-    What it deliberately does NOT remove:
+    What it does NOT remove, and why. Both are stated here because an earlier version of this
+    script claimed to remove "everything the demo created, and nothing else" while quietly
+    leaving things behind, which is how the Power Platform environment went unremoved for so
+    long. The boundary is now explicit rather than implied:
+
+      * The two Microsoft Entra ID app registrations. These are created by the BOOTSTRAP
+        (Initialize-EntraResources.ps1), not by a deployment. The deployment one is the identity
+        the pipelines sign in with, so deleting it means re-running the bootstrap and re-setting
+        every repository secret before the next deploy. Deploy runs happily against the same
+        pair any number of times, so keeping them costs nothing and destroys nothing.
+        Pass -RemoveEntraApplications when you do want them gone.
 
       * The "HTTP with Microsoft Entra ID" connector service principal and its delegated
-        permission grant. That service principal is a shared, tenant-wide Microsoft first-party
-        application that other solutions in the tenant may depend on. It is not ours to delete.
-
-    Deleting the app registrations removes the identity the pipelines
-    authenticate with, so Initialize-EntraResources.ps1 has to be re-run, and the repository
-    secrets re-set, before deploying again.
+        permission grant. That is a shared, tenant-wide Microsoft first-party application other
+        solutions in the tenant may depend on. It is never removed, at all, by design.
 
     Two guards stop this being pointed at the wrong thing: the resource group must carry the
     demo's own workload tag, and the environment's display name must match the one supplied.
@@ -42,9 +48,10 @@
 .PARAMETER KeepPowerPlatformEnvironment
     Unlink and uninstall the solution, but leave the environment itself in place.
 
-.PARAMETER KeepEntraApplications
-    Keep the app registrations created by Initialize-EntraResources.ps1. By default they are
-    deleted, because the deployment created them.
+.PARAMETER RemoveEntraApplications
+    Also delete the bootstrap's app registrations. Off by default: it removes the identity the
+    pipelines sign in with, so Initialize-EntraResources.ps1 has to be re-run and the repository
+    secrets re-set before deploying again.
 
 .PARAMETER Force
     Do not prompt for confirmation.
@@ -67,7 +74,7 @@ param(
 
     [string] $SolutionUniqueName = 'SecureRequestClassifier',
 
-    [switch] $KeepEntraApplications,
+    [switch] $RemoveEntraApplications,
 
     [string] $DeploymentAppDisplayName = 'Secure Request Classifier - GitHub deployment',
 
@@ -208,7 +215,7 @@ if ($resourceGroup) {
 
 # ---------------------------------------------------------------------------------------------
 
-if (-not $KeepEntraApplications) {
+if ($RemoveEntraApplications) {
     Write-Step 'Deleting Microsoft Entra ID app registrations'
     Write-Host '    This removes the identity the pipelines sign in with. Re-run' -ForegroundColor Yellow
     Write-Host '    Initialize-EntraResources.ps1 and reset the repository secrets' -ForegroundColor Yellow
@@ -227,13 +234,39 @@ if (-not $KeepEntraApplications) {
             Write-Host "    deleted '$displayName' ($appId)" -ForegroundColor Green
         }
     }
-
-    Write-Host ''
-    Write-Host '    The "HTTP with Microsoft Entra ID" connector service principal and its' -ForegroundColor Yellow
-    Write-Host '    delegated permission grant are intentionally left alone: that service' -ForegroundColor Yellow
-    Write-Host '    principal is a shared, tenant-wide Microsoft first-party application and' -ForegroundColor Yellow
-    Write-Host '    other solutions may depend on it.' -ForegroundColor Yellow
 }
 
+# ---------------------------------------------------------------------------------------------
+# Say plainly what survived. An earlier version of this script claimed to remove "everything the
+# demo created, and nothing else" while silently leaving the environment behind, so the boundary
+# is now printed on every run rather than described in a comment nobody reads.
+
 Write-Step 'Cleanup complete'
-Write-Host 'Nothing outside the demo resource group was modified.' -ForegroundColor Green
+
+Write-Host 'Removed:' -ForegroundColor Green
+Write-Host "    resource group '$ResourceGroupName' and everything in it"
+if ($PowerPlatformEnvironmentId -and -not $KeepPowerPlatformEnvironment) {
+    Write-Host '    the Power Platform environment, its Dataverse database and the solution'
+}
+
+Write-Host ''
+Write-Host 'Left in place:' -ForegroundColor Yellow
+
+if ($KeepPowerPlatformEnvironment) {
+    Write-Host '    the Power Platform environment (-KeepPowerPlatformEnvironment)'
+}
+
+if (-not $RemoveEntraApplications) {
+    Write-Host '    the two bootstrap app registrations. They are created by'
+    Write-Host '    Initialize-EntraResources.ps1, not by a deployment, and the deployment one is'
+    Write-Host '    the identity these pipelines sign in with. Deploy can run again as-is.'
+    Write-Host '    Pass -RemoveEntraApplications to delete them, then re-run the bootstrap and'
+    Write-Host '    reset the repository secrets before the next deploy.'
+}
+
+Write-Host '    the "HTTP with Microsoft Entra ID" connector service principal and its delegated'
+Write-Host '    permission grant. Never removed, by design: it is a shared, tenant-wide Microsoft'
+Write-Host '    first-party application other solutions in the tenant may depend on.'
+
+Write-Host ''
+Write-Host 'Nothing else was modified.' -ForegroundColor Green

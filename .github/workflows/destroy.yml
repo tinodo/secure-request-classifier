@@ -1,15 +1,22 @@
 name: Destroy
 
-# Removes everything the Deploy workflow and the bootstrap create: the Azure resource group, the
-# Power Platform environment, and the two Microsoft Entra ID app registrations.
+# Removes everything the DEPLOY workflow creates: the Azure resource group and everything in it,
+# and the Power Platform environment including its Dataverse database and the imported solution.
 #
-# Deleting the app registrations removes the identity these pipelines authenticate with, so
-# before deploying again you must re-run scripts/Initialize-EntraResources.ps1 and set the
-# repository secrets it prints. Untick remove-entra-applications to keep them and skip that.
+# It does NOT remove two things, both deliberate, both opt-in or never:
 #
-# It never removes the "HTTP with Microsoft Entra ID" connector service principal or its
-# delegated permission grant: that is a shared, tenant-wide Microsoft first-party application
-# that other solutions in the tenant may depend on. It is not ours to delete.
+#   * The two Microsoft Entra ID app registrations. These are created by the BOOTSTRAP
+#     (scripts/Initialize-EntraResources.ps1), not by a deployment, and the deployment one is the
+#     identity these pipelines sign in with. Deleting it means re-running the bootstrap and
+#     re-setting every repository secret before you can deploy again, so it is opt-in via
+#     remove-entra-applications. Deploy is happy to run repeatedly against the same pair.
+#
+#   * The "HTTP with Microsoft Entra ID" connector service principal and its delegated
+#     permission grant. That is a shared, tenant-wide Microsoft first-party application that
+#     other solutions in the tenant may depend on. It is never removed, at all, by design.
+#
+# So: everything the deploy pipeline builds is destroyed; the one-time bootstrap identity
+# survives unless you ask otherwise. Run summary states which of these applied.
 #
 # Requires an explicit typed confirmation, refuses to delete a resource group that does not carry
 # the demo's own workload tag, and refuses to delete an environment whose display name does not
@@ -27,9 +34,9 @@ on:
         type: boolean
         default: false
       remove-entra-applications:
-        description: Also delete the app registrations created by the bootstrap script
+        description: Also delete the app registrations created by the bootstrap script (leaves you unable to deploy until you re-run it)
         type: boolean
-        default: true
+        default: false
 
 permissions:
   id-token: write
@@ -102,8 +109,8 @@ jobs:
             $parameters.KeepPowerPlatformEnvironment = $true
           }
 
-          if ('${{ inputs.remove-entra-applications }}' -ne 'true') {
-            $parameters.KeepEntraApplications = $true
+          if ('${{ inputs.remove-entra-applications }}' -eq 'true') {
+            $parameters.RemoveEntraApplications = $true
           }
 
           ./scripts/Remove-Demo.ps1 @parameters
@@ -122,12 +129,14 @@ jobs:
             else
               echo "| Power Platform environment | yes, including its Dataverse database and the solution |"
             fi
-            if [ "${{ inputs.remove-entra-applications }}" = "false" ]; then
-              echo "| Entra app registrations | no — kept on request, so Deploy still works without re-bootstrapping |"
+            if [ "${{ inputs.remove-entra-applications }}" = "true" ]; then
+              echo "| Entra app registrations (from the bootstrap) | yes — re-run \`Initialize-EntraResources.ps1\` and reset the repository secrets before deploying again |"
             else
-              echo "| Entra app registrations | yes — re-run \`Initialize-EntraResources.ps1\` and reset the repository secrets before deploying again |"
+              echo "| Entra app registrations (from the bootstrap) | no — kept by design, so Deploy can run again without re-bootstrapping |"
             fi
-            echo "| Connector service principal and grant | no — shared tenant-wide Microsoft application |"
+            echo "| Connector service principal and its grant | no — never removed: shared tenant-wide Microsoft application |"
             echo
-            echo "Nothing outside the resource group and that environment was modified."
+            echo "Everything the Deploy workflow creates is gone. The bootstrap identity survives"
+            echo "unless \`remove-entra-applications\` was ticked. Nothing outside the resource"
+            echo "group and that environment was modified."
           } >> "$GITHUB_STEP_SUMMARY"
