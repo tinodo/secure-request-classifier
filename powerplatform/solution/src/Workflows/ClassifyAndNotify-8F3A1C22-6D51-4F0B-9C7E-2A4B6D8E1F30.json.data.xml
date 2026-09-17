@@ -9,9 +9,10 @@
   human (see docs/limitations.md).
 
   NOTE: nothing in the pipeline turns the flow on. Once the connections exist and the deployment
-  settings file binds them, activate it from Power Automate, or with
-      pac flow enable --environment <url> --flow 8f3a1c22-6d51-4f0b-9c7e-2a4b6d8e1f30
-  An earlier version of this comment claimed the deployment workflow did it. It never has.
+  settings file binds them, activate it from Power Automate, or with `pac flow enable` naming
+  this flow id. An earlier version of this comment claimed the deployment workflow did it. It
+  never has. (Command switches are spelled out in docs/deployment.md rather than here, because
+  an XML comment may not contain a double hyphen.)
 -->
 <Workflow WorkflowId="{8f3a1c22-6d51-4f0b-9c7e-2a4b6d8e1f30}" Name="Classify and Notify" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <JsonFileName>/Workflows/ClassifyAndNotify-8F3A1C22-6D51-4F0B-9C7E-2A4B6D8E1F30.json</JsonFileName>
