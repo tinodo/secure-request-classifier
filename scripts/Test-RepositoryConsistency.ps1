@@ -490,6 +490,42 @@ Assert-True -Name 'Remove-Demo.ps1 tolerates an absent resource group' `
 # ---------------------------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------------------------
+# Docs must classify each setting the same way the workflows read it
+#
+# docs/limitations.md once told the reader to "store it as a repository variable" directly above
+# a code block running `gh secret set`, while deploy.yml read it from `secrets.`. Three sources,
+# two answers. Check the mechanical half: anything the docs tell you to set must be read from the
+# matching context.
+# ---------------------------------------------------------------------------------------------
+
+$workflowText = ($deployWorkflow + "`n" + $destroyWorkflow + "`n" + (Get-FileText '.github/workflows/ci.yml'))
+
+$docFiles = Get-ChildItem -Path (Join-Path $RepositoryRoot 'docs') -Filter '*.md' -File |
+    ForEach-Object { "docs/$($_.Name)" }
+$docFiles += 'README.md'
+
+foreach ($docFile in $docFiles) {
+    $docText = Get-FileText $docFile
+
+    foreach ($match in [regex]::Matches($docText, 'gh (?<kind>secret|variable) set (?<name>[A-Z0-9_]+)')) {
+        $name = $match.Groups['name'].Value
+        $kind = $match.Groups['kind'].Value
+
+        # Only meaningful for settings a workflow actually consumes.
+        $readAsSecret = $workflowText -match "secrets\.$name\b"
+        $readAsVariable = $workflowText -match "vars\.$name\b"
+
+        if (-not ($readAsSecret -or $readAsVariable)) { continue }
+
+        $expected = if ($readAsSecret) { 'secret' } else { 'variable' }
+
+        Assert-True -Name "$docFile sets $name as a $expected, matching the workflows" `
+            -Condition ($kind -eq $expected) `
+            -Detail "The docs say 'gh $kind set', but the workflows read it from '$(if ($readAsSecret) { 'secrets' } else { 'vars' }).$name'."
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
 # Community health files. A public repository is expected to carry these, and SECURITY.md in
 # particular has to exist before anyone can report a vulnerability responsibly.
 # ---------------------------------------------------------------------------------------------

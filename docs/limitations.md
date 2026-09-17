@@ -96,13 +96,29 @@ Once per Power Platform environment:
 3. *Microsoft Entra ID Resource URI (Application ID URI)*: the value of the `AZURE_API_APP_ID_URI` secret, for example `api://44444444-…`.
 4. *Base Resource URL*: the Function App base URL, for example `https://func-srclass-demo-ab12cd.azurewebsites.net`.
 5. Sign in.
-6. Read the connection ID and store it as a repository **variable** (a connection ID is an identifier, not a credential):
+6. Read the connection ID and store it as a repository **secret**:
 
    ```powershell
    pac connection list --environment <environment-url>
    gh secret set POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS --body <guid>
    gh secret set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
    ```
+
+   A connection ID is **not a credential** — holding one grants nothing without permission on the
+   environment. It is stored as a secret for the same reason as every other identifier here
+   (`AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `POWER_PLATFORM_APP_ID` and the rest): GitHub
+   masks secrets in Actions logs, and on a public repository those logs are world-readable. The
+   convention in this repository is therefore:
+
+   | Kind | Where | Why |
+   | --- | --- | --- |
+   | Credentials | **nowhere** | Deployment is GitHub OIDC only. None exist to store |
+   | Identifiers that reveal tenant, subscription or environment topology | repository **secrets** | So they are masked in public run logs |
+   | Non-identifying configuration — region, labels, feature switches | repository **variables** | Harmless in a log, and useful to see there |
+
+   So "no secrets in this repository" means no *credentials*, and nothing sensitive committed to
+   git. It does not mean the workflows use no GitHub Actions secrets: all ten of them are
+   identifiers.
 
 CI then binds the existing connection through the deployment settings file. `scripts/Initialize-EntraResources.ps1` has already created the `oauth2PermissionGrant` that makes step 5 succeed without a consent prompt.
 
