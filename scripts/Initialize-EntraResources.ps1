@@ -475,16 +475,57 @@ if (-not $account) {
     throw "Not signed in. Run 'az login' first."
 }
 
+$originalSubscriptionId = $account.id
+$originalTenantId = $account.tenantId
+
 az account set --subscription $SubscriptionId
 $tenantId = (az account show --query tenantId --output tsv)
 Write-Host "    tenant       $tenantId"
 Write-Host "    subscription $SubscriptionId"
+
+# Everything below writes to Microsoft Entra ID, and `az ad` always targets the tenant of the
+# ACTIVE subscription. If that is not the tenant the app registrations live in, this script does
+# not fail - it cheerfully creates a second, duplicate set in the wrong tenant.
+#
+# That is not hypothetical. Some subscriptions report a tenantId that is not the one you signed
+# in against, and switching to such a subscription silently moves every Graph call to a different
+# directory. Refuse rather than guess.
+if ($tenantId -ne $originalTenantId) {
+    az account set --subscription $originalSubscriptionId
+
+    throw @"
+Refusing to continue.
+
+You signed in against tenant
+    $originalTenantId
+but subscription $SubscriptionId reports tenant
+    $tenantId
+
+Every app registration this script creates would land in the second tenant, which is probably
+not where your existing ones are. Sign in to the intended tenant explicitly first:
+
+    az login --tenant $originalTenantId
+
+then re-run. The active subscription has been restored to $originalSubscriptionId.
+"@
+}
 
 # ---------------------------------------------------------------------------------------------
 
 Write-Step "Creating the deployment app registration (workload identity federation, no secret)"
 
 $deploymentApp = New-OrGetApplication -DisplayName $DeploymentAppDisplayName
+
+# Under -WhatIf the create is skipped and $null comes back, so every later dereference fails with
+# "The property 'appId' cannot be found on this object". Stop here with an explanation instead:
+# -WhatIf can only preview a run where the objects already exist.
+if (-not $deploymentApp) {
+    Write-Host ''
+    Write-Warning 'The deployment app registration does not exist yet, so there is nothing further to preview.'
+    Write-Warning 'Re-run without -WhatIf to create it.'
+    return
+}
+
 $deploymentSp = New-OrGetServicePrincipal -AppId $deploymentApp.appId
 
 $subjectPrefix = Get-GitHubSubjectPrefix -Repository $GitHubRepository
@@ -541,8 +582,10 @@ foreach ($credential in @($existingCredentials.value)) {
     Write-Host "    removing retired federated credential '$($credential.name)' ($($credential.subject))" -ForegroundColor Yellow
     Write-Host '      it bypassed the GitHub environment gate on a subscription-scope identity.' -ForegroundColor Yellow
 
-    Invoke-Graph -Method DELETE `
-        -Uri "$script:GraphBase/applications/$($deploymentApp.id)/federatedIdentityCredentials/$($credential.id)" | Out-Null
+    if ($PSCmdlet.ShouldProcess($credential.name, 'Delete retired federated identity credential')) {
+        Invoke-Graph -Method DELETE `
+            -Uri "$script:GraphBase/applications/$($deploymentApp.id)/federatedIdentityCredentials/$($credential.id)" | Out-Null
+    }
 }
 
 # ---------------------------------------------------------------------------------------------
