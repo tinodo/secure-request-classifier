@@ -62,6 +62,12 @@ env:
   BUILD_ARTIFACT_NAME: released-package
 
 jobs:
+  # NOTE ON THE JOB GATES BELOW
+  # On a `push` event the `inputs` context is empty, and GitHub coerces a null-to-boolean
+  # comparison to numbers: `inputs.x != false` becomes `0 != 0`, which is FALSE. Writing the
+  # gate that way therefore skips every deployment job on push and the workflow only ever
+  # validates. The gates are written as `github.event_name != 'workflow_dispatch' || inputs.x`
+  # so that a push deploys, while a manual run still honours the tick boxes.
   # -------------------------------------------------------------------------------------------
   validate:
     name: Validate
@@ -115,7 +121,7 @@ jobs:
   build-function:
     name: Build function package
     needs: validate
-    if: ${{ inputs.deploy-function != false }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.deploy-function) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -162,7 +168,7 @@ jobs:
   power-platform-environment:
     name: Provision Power Platform environment
     needs: validate
-    if: ${{ inputs.provision-power-platform-environment != false }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.provision-power-platform-environment) }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     outputs:
@@ -235,7 +241,7 @@ jobs:
   infrastructure:
     name: Deploy Azure infrastructure
     needs: validate
-    if: ${{ inputs.deploy-infrastructure != false }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.deploy-infrastructure) }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     outputs:
@@ -347,7 +353,7 @@ jobs:
   deploy-function:
     name: Deploy function code
     needs: [infrastructure, build-function]
-    if: ${{ inputs.deploy-function != false && needs.infrastructure.result == 'success' }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.deploy-function) && needs.infrastructure.result == 'success' }}
     # Set FUNCTION_DEPLOY_RUNNER_LABEL to a self-hosted runner (or a GitHub-hosted larger
     # runner with Azure private networking) to deploy without ever opening public access.
     runs-on: ${{ vars.FUNCTION_DEPLOY_RUNNER_LABEL || 'ubuntu-latest' }}
@@ -446,7 +452,7 @@ jobs:
   link-enterprise-policy:
     name: Link Power Platform to the virtual network
     needs: [infrastructure, power-platform-environment, resolve]
-    if: ${{ always() && inputs.link-enterprise-policy != false && needs.infrastructure.result == 'success' && (needs.power-platform-environment.outputs.environment-id != '' || needs.resolve.outputs.has-environment-id == 'true') }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.link-enterprise-policy) && needs.infrastructure.result == 'success' && (needs.power-platform-environment.outputs.environment-id != '' || needs.resolve.outputs.has-environment-id == 'true') }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     env:
@@ -482,7 +488,7 @@ jobs:
   power-platform:
     name: Deploy Power Platform solution
     needs: [infrastructure, deploy-function, power-platform-environment, resolve]
-    if: ${{ always() && inputs.deploy-power-platform != false && needs.infrastructure.result == 'success' && (needs.power-platform-environment.outputs.environment-url != '' || needs.resolve.outputs.has-environment-url == 'true') }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.deploy-power-platform) && needs.infrastructure.result == 'success' && (needs.power-platform-environment.outputs.environment-url != '' || needs.resolve.outputs.has-environment-url == 'true') }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     env:
@@ -543,7 +549,7 @@ jobs:
   verify:
     name: Verify
     needs: [infrastructure, deploy-function, power-platform, link-enterprise-policy, power-platform-environment]
-    if: ${{ always() && inputs.run-verification != false && needs.infrastructure.result == 'success' }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run-verification) && needs.infrastructure.result == 'success' }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     env:
