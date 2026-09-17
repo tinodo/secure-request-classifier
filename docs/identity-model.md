@@ -206,8 +206,8 @@ The `security-invariants` CI job fails the build if that ever stops being true.
 
 | Identity | Created by | Removed by |
 | --- | --- | --- |
-| Deployment app registration | `Initialize-EntraResources.ps1` | `Remove-Demo.ps1 -RemoveEntraApplications` |
-| API app registration | `Initialize-EntraResources.ps1` | `Remove-Demo.ps1 -RemoveEntraApplications` |
+| Deployment app registration | `Initialize-EntraResources.ps1` | `Remove-Demo.ps1` (by default; `-KeepEntraApplications` keeps it) |
+| API app registration | `Initialize-EntraResources.ps1` | `Remove-Demo.ps1` (by default; `-KeepEntraApplications` keeps it) |
 | Function managed identity | Bicep, with the Function App | deleting the resource group |
 | Connector service principal | `Initialize-EntraResources.ps1` if absent | **deliberately never removed** — it is a shared tenant-wide Microsoft application and other solutions may depend on it |
 | Delegated permission grant | `Initialize-EntraResources.ps1` | **deliberately never removed** — removing it could break other solutions using the same connector |

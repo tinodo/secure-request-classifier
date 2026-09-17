@@ -396,6 +396,16 @@ Assert-True -Name 'Environment deletion is guarded by the expected display name'
     -Condition ($removeDemo -match 'PowerPlatformEnvironmentName') `
     -Detail 'Provisioning adopts an existing environment, so deletion must confirm which one it is.'
 
+# The bootstrap creates the two app registrations, so Destroy removes them by default too.
+# Opting out is a switch named for what it does; the default must not quietly become "keep".
+Assert-True -Name 'Destroy deletes the Entra app registrations by default' `
+    -Condition ($destroyWorkflow -match '(?s)remove-entra-applications:.*?default:\s*true') `
+    -Detail 'Destroy should remove what the bootstrap created unless explicitly told not to.'
+
+Assert-True -Name 'Remove-Demo.ps1 deletes the Entra apps unless told to keep them' `
+    -Condition ($removeDemo -match 'if \(-not \$KeepEntraApplications\)') `
+    -Detail 'The script default must match the workflow default.'
+
 # ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)

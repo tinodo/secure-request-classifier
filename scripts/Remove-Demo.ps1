@@ -13,15 +13,15 @@
          imported solution.
       3. Delete the Azure resource group, and wait for it.
 
-    What it deliberately does NOT remove, and why:
+    What it deliberately does NOT remove:
 
-      * The two Microsoft Entra ID app registrations created by Initialize-EntraResources.ps1.
-        That is a one-time bootstrap run by hand, not part of a deployment, and deleting them
-        means re-running it and re-setting every repository secret. Pass
-        -RemoveEntraApplications when you do want them gone.
       * The "HTTP with Microsoft Entra ID" connector service principal and its delegated
         permission grant. That service principal is a shared, tenant-wide Microsoft first-party
-        application and other solutions may depend on it.
+        application that other solutions in the tenant may depend on. It is not ours to delete.
+
+    Deleting the app registrations removes the identity the pipelines
+    authenticate with, so Initialize-EntraResources.ps1 has to be re-run, and the repository
+    secrets re-set, before deploying again.
 
     Two guards stop this being pointed at the wrong thing: the resource group must carry the
     demo's own workload tag, and the environment's display name must match the one supplied.
@@ -42,8 +42,9 @@
 .PARAMETER KeepPowerPlatformEnvironment
     Unlink and uninstall the solution, but leave the environment itself in place.
 
-.PARAMETER RemoveEntraApplications
-    Also delete the app registrations created by Initialize-EntraResources.ps1.
+.PARAMETER KeepEntraApplications
+    Keep the app registrations created by Initialize-EntraResources.ps1. By default they are
+    deleted, because the deployment created them.
 
 .PARAMETER Force
     Do not prompt for confirmation.
@@ -66,7 +67,7 @@ param(
 
     [string] $SolutionUniqueName = 'SecureRequestClassifier',
 
-    [switch] $RemoveEntraApplications,
+    [switch] $KeepEntraApplications,
 
     [string] $DeploymentAppDisplayName = 'Secure Request Classifier - GitHub deployment',
 
@@ -207,8 +208,11 @@ if ($resourceGroup) {
 
 # ---------------------------------------------------------------------------------------------
 
-if ($RemoveEntraApplications) {
+if (-not $KeepEntraApplications) {
     Write-Step 'Deleting Microsoft Entra ID app registrations'
+    Write-Host '    This removes the identity the pipelines sign in with. Re-run' -ForegroundColor Yellow
+    Write-Host '    Initialize-EntraResources.ps1 and reset the repository secrets' -ForegroundColor Yellow
+    Write-Host '    before deploying again.' -ForegroundColor Yellow
 
     foreach ($displayName in @($DeploymentAppDisplayName, $ApiAppDisplayName)) {
         $appId = az ad app list --display-name $displayName --query '[0].appId' --output tsv 2>$null

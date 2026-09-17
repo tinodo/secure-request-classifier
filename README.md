@@ -448,8 +448,8 @@ This removes both of the things the Deploy workflow creates:
 | --- | --- |
 | Resource group `rg-srclass-demo` and everything in it | Yes, and it waits for the deletion to finish |
 | Power Platform environment, its Dataverse database and the solution | Yes — pass `-KeepPowerPlatformEnvironment` to keep it |
-| The two Entra app registrations from `Initialize-EntraResources.ps1` | No — pass `-RemoveEntraApplications`. They are a one-time bootstrap, and deleting them means re-running it and re-setting every repository secret |
-| The `HTTP with Microsoft Entra ID` connector service principal and its grant | No — shared, tenant-wide Microsoft first-party application |
+| The two Entra app registrations from `Initialize-EntraResources.ps1` | Yes — pass `-KeepEntraApplications` to keep them. Deleting them removes the identity the pipelines sign in with, so re-run the bootstrap and reset the repository secrets before deploying again |
+| The `HTTP with Microsoft Entra ID` connector service principal and its grant | No — shared, tenant-wide Microsoft first-party application, not ours to delete |
 
 Order matters, and the script enforces it: the environment is unlinked from the enterprise policy first, then deleted, and only then is the resource group removed — otherwise the delegated subnet can still be held and the virtual network refuses to delete.
 
