@@ -15,7 +15,7 @@ flowchart TB
 
     subgraph runtime["Runtime plane"]
         USER["Signed-in user"]
-        CONN["Connector app<br/>d2ebd3a9-1ada-4480-8b2d-eac162716601"]
+        CONN["Connector app<br/>7ab7862c-4c57-491e-8a45-d52a7e023983"]
         APIAPP["App registration<br/>Secure Request Classifier - Function API"]
         FUNCMI["Function App<br/>system-assigned managed identity"]
     end
@@ -146,7 +146,7 @@ These combine with a logical AND. A token for a different API, from a different 
 ## 4. The HTTP with Microsoft Entra ID connector
 
 **Type:** Microsoft first-party multi-tenant application
-**Application ID:** `d2ebd3a9-1ada-4480-8b2d-eac162716601`
+**Application ID:** `7ab7862c-4c57-491e-8a45-d52a7e023983`
 
 Microsoft publishes this value in [`ManagePermissionGrant.ps1`](https://github.com/microsoft/PowerApps-Samples/blob/master/powershell/connectors/HTTPWithMicrosoftEntraId/ManagePermissionGrant.ps1), which its connector documentation links to, as `$HttpWithAADAppAppId`. Microsoft's own tooling refers to it as `ServiceApp_NoPreAuths` — the newer connector app that carries **no** built-in preauthorization, so an administrator must grant discrete consent.
 

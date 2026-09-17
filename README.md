@@ -218,6 +218,7 @@ sequenceDiagram
 │   ├── Set-FunctionAppDeploymentWindow.ps1 Opens/closes the transient deployment window
 │   ├── Set-PowerPlatformSubnetInjection.ps1 Links the environment to the enterprise policy
 │   ├── Test-Deployment.ps1                 30+ post-deployment assertions
+│   ├── Test-FlowConnectorParameters.ps1    Flow action parameters vs the live connector schema
 │   ├── Test-RepositoryConsistency.ps1      Asserts every artefact agrees with every other
 │   ├── Invoke-PrivateConnectivityProbe.ps1 Proves private reachability and public unreachability
 │   ├── Remove-Demo.ps1                     Guarded cleanup
@@ -347,7 +348,7 @@ Five distinct identities, each with the narrowest job that works.
 | GitHub Actions deployment identity | Entra app registration | **Federated credential** (GitHub OIDC). No secret exists. | Contributor + Role Based Access Control Administrator on the subscription; Dataverse System Administrator; Power Platform Administrator |
 | Function App | System-assigned managed identity | Managed identity | Storage Blob Data Owner / Queue / Table Contributor on **its own** storage account; Monitoring Metrics Publisher on **its own** Application Insights. Nothing else. |
 | Function API | Entra app registration | Nothing — it is a token *audience* | Exposes `api://<appId>/user_impersonation`; validated by App Service Authentication |
-| HTTP with Microsoft Entra ID connector | Microsoft first-party app `d2ebd3a9-1ada-4480-8b2d-eac162716601` | Delegated user consent | Obtains a token for the API on behalf of the signed-in user. Listed in `allowedApplications` |
+| HTTP with Microsoft Entra ID connector | Microsoft first-party app `7ab7862c-4c57-491e-8a45-d52a7e023983` | Delegated user consent | Obtains a token for the API on behalf of the signed-in user. Listed in `allowedApplications` |
 | Signed-in user | Entra user | Interactive | Runs the app; their identity flows through to the Function |
 
 Details, including exactly what each grant permits, are in [docs/identity-model.md](docs/identity-model.md).

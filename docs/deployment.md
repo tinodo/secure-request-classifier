@@ -49,7 +49,7 @@ This creates, idempotently:
 | Resource | Note |
 | --- | --- |
 | Deployment app registration | With **three federated identity credentials** (main branch, pull requests, the `demo` environment). No client secret is created. || API app registration | Exposes `api://<appId>` and the `user_impersonation` scope, with `requestedAccessTokenVersion: 2` |
-| Connector service principal | For Microsoft's `d2ebd3a9-1ada-4480-8b2d-eac162716601` app, created if it does not exist in your tenant |
+| Connector service principal | For Microsoft's `7ab7862c-4c57-491e-8a45-d52a7e023983` app, created if it does not exist in your tenant |
 | Delegated permission grant | `AllPrincipals` consent so users are not prompted when creating the connection |
 | Pre-authorized application | The connector added to the API's `preAuthorizedApplications` |
 | Azure role assignments | `Contributor` and `Role Based Access Control Administrator` at subscription scope |
