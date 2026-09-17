@@ -215,7 +215,8 @@ sequenceDiagram
 │   ├── Set-PowerPlatformSubnetInjection.ps1 Links the environment to the enterprise policy
 │   ├── Test-Deployment.ps1                 30+ post-deployment assertions
 │   ├── Invoke-PrivateConnectivityProbe.ps1 Proves private reachability and public unreachability
-│   └── Remove-Demo.ps1                     Guarded cleanup
+│   ├── Remove-Demo.ps1                     Guarded cleanup
+│   └── Remove-PowerPlatformEnvironment.ps1 Deletes the environment Deploy created
 ├── docs/
 │   ├── architecture.md           Component-by-component walkthrough
 │   ├── networking-model.md       Subnets, delegation, DNS, region pairing
@@ -434,15 +435,27 @@ Common symptoms and their causes are catalogued in **[docs/troubleshooting.md](d
 
 ```powershell
 pwsh ./scripts/Remove-Demo.ps1 `
-    -ResourceGroupName            rg-srclass-demo `
-    -PowerPlatformEnvironmentId   <environment-id> `
-    -PowerPlatformEnvironmentUrl  https://contoso.crm4.dynamics.com `
-    -RemoveEntraApplications
+    -ResourceGroupName             rg-srclass-demo `
+    -PowerPlatformEnvironmentId    <environment-id> `
+    -PowerPlatformEnvironmentName  srclass-demo
 ```
 
 or run the **Destroy** workflow and type `DESTROY` to confirm.
 
-The script unlinks the Power Platform environment from the enterprise policy *before* deleting the networks, and refuses to delete a resource group that is not tagged `workload=secure-request-classifier`. Because the demo never touches hub networking, shared DNS zones or any pre-existing resource, deleting that one resource group is complete and safe.
+This removes both of the things the Deploy workflow creates:
+
+| Item | Removed by default |
+| --- | --- |
+| Resource group `rg-srclass-demo` and everything in it | Yes, and it waits for the deletion to finish |
+| Power Platform environment, its Dataverse database and the solution | Yes — pass `-KeepPowerPlatformEnvironment` to keep it |
+| The two Entra app registrations from `Initialize-EntraResources.ps1` | No — pass `-RemoveEntraApplications`. They are a one-time bootstrap, and deleting them means re-running it and re-setting every repository secret |
+| The `HTTP with Microsoft Entra ID` connector service principal and its grant | No — shared, tenant-wide Microsoft first-party application |
+
+Order matters, and the script enforces it: the environment is unlinked from the enterprise policy first, then deleted, and only then is the resource group removed — otherwise the delegated subnet can still be held and the virtual network refuses to delete.
+
+Two guards stop it being aimed at the wrong thing: the resource group must be tagged `workload=secure-request-classifier`, and the environment's display name must match the one you supply. The latter matters because provisioning runs with `-AdoptExisting`, so an environment carrying the configured name is not necessarily one the pipeline created.
+
+`scripts/Test-RepositoryConsistency.ps1` asserts in CI that every `New-*.ps1` the Deploy workflow calls has a matching `Remove-*.ps1` that the Destroy path actually invokes, so the two pipelines cannot drift apart again.
 
 ---
 

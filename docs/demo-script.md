@@ -328,7 +328,7 @@ az storage account show -g rg-srclass-demo -n <storage> --query allowSharedKeyAc
 Then, if they want it gone:
 
 ```powershell
-pwsh ./scripts/Remove-Demo.ps1 -ResourceGroupName rg-srclass-demo -PowerPlatformEnvironmentId <env-id>
+pwsh ./scripts/Remove-Demo.ps1 -ResourceGroupName rg-srclass-demo -PowerPlatformEnvironmentId <env-id> -PowerPlatformEnvironmentName srclass-demo
 ```
 
 ---

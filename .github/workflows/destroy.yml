@@ -1,9 +1,19 @@
 name: Destroy
 
-# Removes everything the demo created, and nothing else.
+# Removes what the Deploy workflow creates: the Azure resource group, and the Power Platform
+# environment.
 #
-# Requires an explicit typed confirmation so it cannot be triggered by accident, and refuses to
-# delete a resource group that does not carry the demo's own workload tag.
+# It does NOT remove, unless you ask it to:
+#   * the two Microsoft Entra ID app registrations created by Initialize-EntraResources.ps1,
+#     because that is a one-time bootstrap run by hand and deleting them means re-running it and
+#     re-setting every repository secret  -> remove-entra-applications
+#
+# It never removes the "HTTP with Microsoft Entra ID" connector service principal or its
+# delegated permission grant: that is a shared, tenant-wide Microsoft first-party application.
+#
+# Requires an explicit typed confirmation, refuses to delete a resource group that does not carry
+# the demo's own workload tag, and refuses to delete an environment whose display name does not
+# match POWER_PLATFORM_ENVIRONMENT_NAME.
 
 on:
   workflow_dispatch:
@@ -12,14 +22,14 @@ on:
         description: Type DESTROY to confirm
         required: true
         type: string
+      keep-power-platform-environment:
+        description: Keep the Power Platform environment (only unlink it and uninstall the solution)
+        type: boolean
+        default: false
       remove-entra-applications:
         description: Also delete the app registrations created by the bootstrap script
         type: boolean
         default: false
-      unlink-power-platform:
-        description: Unlink the Power Platform environment from the enterprise policy first
-        type: boolean
-        default: true
 
 permissions:
   id-token: write
@@ -33,6 +43,9 @@ jobs:
   destroy:
     name: Destroy the demo
     runs-on: ubuntu-latest
+    # Deleting a Dataverse environment and a resource group full of private endpoints both take
+    # their time, and this job waits for each rather than reporting success while they run.
+    timeout-minutes: 90
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     steps:
       - name: Check the confirmation
@@ -43,6 +56,8 @@ jobs:
           fi
 
       - uses: actions/checkout@v5
+
+      - uses: microsoft/powerplatform-actions/actions-install@v1
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
@@ -63,6 +78,7 @@ jobs:
         env:
           ENVIRONMENT_ID: ${{ steps.environment.outputs.environment-id }}
           ENVIRONMENT_URL: ${{ steps.environment.outputs.environment-url }}
+          ENVIRONMENT_NAME: ${{ vars.POWER_PLATFORM_ENVIRONMENT_NAME || 'srclass-demo' }}
         run: |
           $parameters = @{
             ResourceGroupName = '${{ vars.RESOURCE_GROUP_NAME || 'rg-srclass-demo' }}'
@@ -70,12 +86,20 @@ jobs:
             Confirm           = $false
           }
 
-          if ('${{ inputs.unlink-power-platform }}' -eq 'true' -and $env:ENVIRONMENT_ID) {
-            $parameters.PowerPlatformEnvironmentId = $env:ENVIRONMENT_ID
+          if ($env:ENVIRONMENT_ID) {
+            $parameters.PowerPlatformEnvironmentId   = $env:ENVIRONMENT_ID
+            $parameters.PowerPlatformEnvironmentName = $env:ENVIRONMENT_NAME
+          }
+          else {
+            Write-Warning "No Power Platform environment named '$($env:ENVIRONMENT_NAME)' was found; nothing to unlink or delete."
           }
 
           if ($env:ENVIRONMENT_URL) {
             $parameters.PowerPlatformEnvironmentUrl = $env:ENVIRONMENT_URL
+          }
+
+          if ('${{ inputs.keep-power-platform-environment }}' -eq 'true') {
+            $parameters.KeepPowerPlatformEnvironment = $true
           }
 
           if ('${{ inputs.remove-entra-applications }}' -eq 'true') {
@@ -90,9 +114,20 @@ jobs:
           {
             echo "## Cleanup"
             echo
-            echo "Resource group \`${{ vars.RESOURCE_GROUP_NAME || 'rg-srclass-demo' }}\` deletion was requested."
+            echo "| Item | Removed |"
+            echo "| --- | --- |"
+            echo "| Resource group \`${{ vars.RESOURCE_GROUP_NAME || 'rg-srclass-demo' }}\` | yes, and waited for it |"
+            if [ "${{ inputs.keep-power-platform-environment }}" = "true" ]; then
+              echo "| Power Platform environment | no — kept on request, solution uninstalled and policy unlinked |"
+            else
+              echo "| Power Platform environment | yes, including its Dataverse database and the solution |"
+            fi
+            if [ "${{ inputs.remove-entra-applications }}" = "true" ]; then
+              echo "| Entra app registrations | yes — re-run \`Initialize-EntraResources.ps1\` and reset the repository secrets before deploying again |"
+            else
+              echo "| Entra app registrations | no — kept, so Deploy still works without re-bootstrapping |"
+            fi
+            echo "| Connector service principal and grant | no — shared tenant-wide Microsoft application |"
             echo
-            echo "Nothing outside that resource group was modified. The demo never used hub"
-            echo "networking, shared private DNS zones or any pre-existing resource, so there is"
-            echo "nothing else to unwind."
+            echo "Nothing outside the resource group and that environment was modified."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -339,6 +339,64 @@ Assert-True -Name 'Resolve-PowerPlatformEnvironment.ps1 exists' `
     -Condition (Test-Path (Join-Path $RepositoryRoot 'scripts/Resolve-PowerPlatformEnvironment.ps1'))
 
 # ---------------------------------------------------------------------------------------------
+# Whatever Deploy creates, Destroy must remove
+#
+# This asymmetry is exactly how the destroy pipeline silently stopped doing what it claimed:
+# environment provisioning was added to deploy.yml and destroy.yml was never taught to undo it,
+# so "Removes everything the demo created" quietly became false. Assert the pairing instead of
+# trusting a comment.
+# ---------------------------------------------------------------------------------------------
+
+$destroyWorkflow = Get-FileText '.github/workflows/destroy.yml'
+$removeDemo = Get-FileText 'scripts/Remove-Demo.ps1'
+
+# Everything reachable from the destroy workflow, one level of indirection deep.
+$destroyReach = $destroyWorkflow + "`n" + $removeDemo
+
+$creators = [regex]::Matches($deployWorkflow, 'scripts/(?<name>New-[A-Za-z0-9]+)\.ps1') |
+    ForEach-Object { $_.Groups['name'].Value } | Select-Object -Unique
+
+# Scripts that create nothing outside the runner's own workspace, so there is nothing to undo.
+# Keep this list short and justified; anything that touches Azure, Dataverse or Entra belongs in
+# the paired check below, not here.
+$localOnlyCreators = @{
+    'New-DeploymentSettings' = 'renders powerplatform/out/deploymentSettings.json inside the runner workspace'
+}
+
+Assert-True -Name 'Deploy calls at least one provisioning script' -Condition ($creators.Count -gt 0)
+
+foreach ($creator in $creators) {
+    if ($localOnlyCreators.ContainsKey($creator)) {
+        Write-Host "[ -- ] $creator.ps1 needs no counterpart: $($localOnlyCreators[$creator])"
+        continue
+    }
+
+    $remover = $creator -replace '^New-', 'Remove-'
+
+    Assert-True -Name "Destroy can undo $creator.ps1 (needs $remover.ps1)" `
+        -Condition (Test-Path (Join-Path $RepositoryRoot "scripts/$remover.ps1")) `
+        -Detail "Deploy creates something with $creator.ps1, so Destroy needs $remover.ps1."
+
+    Assert-True -Name "Destroy actually calls $remover.ps1" `
+        -Condition ($destroyReach -match [regex]::Escape("$remover.ps1")) `
+        -Detail 'The script exists but nothing in the destroy path invokes it.'
+}
+
+# "Destroyed" has to mean destroyed, not "deletion requested". A --no-wait resource group delete
+# lets the workflow go green while Azure is still working, and a redeploy then races it.
+Assert-True -Name 'Remove-Demo.ps1 waits for the resource group delete' `
+    -Condition ($removeDemo -notmatch 'az group delete[^\r\n]*--no-wait') `
+    -Detail 'Drop --no-wait so the run finishing means the resource group is gone.'
+
+Assert-True -Name 'Destroy deletes the Power Platform environment by default' `
+    -Condition ($destroyWorkflow -match '(?s)keep-power-platform-environment:.*?default:\s*false') `
+    -Detail 'Deploy creates the environment, so Destroy must remove it unless explicitly told not to.'
+
+Assert-True -Name 'Environment deletion is guarded by the expected display name' `
+    -Condition ($removeDemo -match 'PowerPlatformEnvironmentName') `
+    -Detail 'Provisioning adopts an existing environment, so deletion must confirm which one it is.'
+
+# ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)
 

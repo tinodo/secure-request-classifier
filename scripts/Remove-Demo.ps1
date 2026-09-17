@@ -1,28 +1,46 @@
 <#
 .SYNOPSIS
-    Removes everything the Secure Request Classifier demo created, and nothing else.
+    Removes everything the Secure Request Classifier deployment created.
 
 .DESCRIPTION
-    The demo is deliberately built as a single, isolated resource group with no dependency on
-    hub networking, shared private DNS zones or any pre-existing resource. Cleanup is
-    therefore scoped to exactly that resource group, plus the optional Power Platform and
-    Microsoft Entra ID artefacts.
+    The deployment creates two things: a single, isolated Azure resource group, and a Power
+    Platform environment. This script removes both, in the order that works:
 
-    The script refuses to delete a resource group that does not carry the demo's own tag,
-    which prevents it from being pointed at something else by accident.
+      1. Unlink the environment from the enterprise policy. This must happen before the virtual
+         networks are deleted, and before the environment is deleted, or the subnet delegation
+         can be left held and the resource group refuses to go.
+      2. Delete the Power Platform environment, including its Dataverse database and the
+         imported solution.
+      3. Delete the Azure resource group, and wait for it.
 
-    Order matters: the Power Platform environment must be unlinked from the enterprise policy
-    before the policy or its virtual networks are deleted, otherwise the environment is left
-    referencing a policy that no longer exists.
+    What it deliberately does NOT remove, and why:
+
+      * The two Microsoft Entra ID app registrations created by Initialize-EntraResources.ps1.
+        That is a one-time bootstrap run by hand, not part of a deployment, and deleting them
+        means re-running it and re-setting every repository secret. Pass
+        -RemoveEntraApplications when you do want them gone.
+      * The "HTTP with Microsoft Entra ID" connector service principal and its delegated
+        permission grant. That service principal is a shared, tenant-wide Microsoft first-party
+        application and other solutions may depend on it.
+
+    Two guards stop this being pointed at the wrong thing: the resource group must carry the
+    demo's own workload tag, and the environment's display name must match the one supplied.
 
 .PARAMETER ResourceGroupName
     Resource group to delete.
 
 .PARAMETER PowerPlatformEnvironmentId
-    Optional. When supplied, the environment is unlinked from the enterprise policy first.
+    Optional. When supplied, the environment is unlinked from the enterprise policy, and deleted
+    unless -KeepPowerPlatformEnvironment is passed.
 
 .PARAMETER PowerPlatformEnvironmentUrl
-    Optional. When supplied, the solution is uninstalled from the environment.
+    Optional. Only used when the environment is being kept, to uninstall the solution from it.
+
+.PARAMETER PowerPlatformEnvironmentName
+    Expected display name of the environment. Deletion is refused unless it matches.
+
+.PARAMETER KeepPowerPlatformEnvironment
+    Unlink and uninstall the solution, but leave the environment itself in place.
 
 .PARAMETER RemoveEntraApplications
     Also delete the app registrations created by Initialize-EntraResources.ps1.
@@ -41,6 +59,10 @@ param(
     [string] $PowerPlatformEnvironmentId,
 
     [string] $PowerPlatformEnvironmentUrl,
+
+    [string] $PowerPlatformEnvironmentName,
+
+    [switch] $KeepPowerPlatformEnvironment,
 
     [string] $SolutionUniqueName = 'SecureRequestClassifier',
 
@@ -95,7 +117,9 @@ Re-run with -SkipTagCheck only if you are certain.
 
 # ---------------------------------------------------------------------------------------------
 
-if ($PowerPlatformEnvironmentUrl) {
+if ($PowerPlatformEnvironmentUrl -and $KeepPowerPlatformEnvironment) {
+    # Only worth doing when the environment survives. If it is being deleted, the solution goes
+    # with it and uninstalling first just adds minutes.
     Write-Step "Uninstalling the '$SolutionUniqueName' solution"
 
     if ($PSCmdlet.ShouldProcess($PowerPlatformEnvironmentUrl, "Delete solution $SolutionUniqueName")) {
@@ -138,18 +162,46 @@ if ($PowerPlatformEnvironmentId) {
 
 # ---------------------------------------------------------------------------------------------
 
+if ($PowerPlatformEnvironmentId -and -not $KeepPowerPlatformEnvironment) {
+    Write-Step 'Deleting the Power Platform environment'
+
+    $removeEnvironment = Join-Path $PSScriptRoot 'Remove-PowerPlatformEnvironment.ps1'
+
+    $environmentParameters = @{
+        EnvironmentId = $PowerPlatformEnvironmentId
+        Confirm       = $false
+    }
+
+    if ($PowerPlatformEnvironmentName) {
+        $environmentParameters.ExpectedDisplayName = $PowerPlatformEnvironmentName
+    }
+    else {
+        # No name to check against, so the guard cannot run. Say so rather than silently
+        # bypassing it.
+        Write-Warning 'No -PowerPlatformEnvironmentName supplied, so the display-name guard is being skipped.'
+        $environmentParameters.SkipNameCheck = $true
+    }
+
+    # The environment must be gone before the resource group, otherwise the delegated subnet can
+    # still be held and the virtual network delete fails.
+    & $removeEnvironment @environmentParameters
+}
+
+# ---------------------------------------------------------------------------------------------
+
 if ($resourceGroup) {
     Write-Step "Deleting resource group '$ResourceGroupName'"
 
     if ($Force -or $PSCmdlet.ShouldProcess($ResourceGroupName, 'Delete resource group and all resources in it')) {
-        az group delete --name $ResourceGroupName --yes --no-wait --only-show-errors
+        # Deliberately NOT --no-wait. This script reporting success has to mean the resource
+        # group is actually gone, otherwise a redeploy races a half-deleted one.
+        az group delete --name $ResourceGroupName --yes --only-show-errors
 
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to start deletion of resource group '$ResourceGroupName'."
+            throw "Failed to delete resource group '$ResourceGroupName'."
         }
 
-        Write-Host '    Deletion started. Track it with:' -ForegroundColor Green
-        Write-Host "      az group wait --deleted --name $ResourceGroupName"
+        Write-Host "    '$ResourceGroupName' is deleted." -ForegroundColor Green
     }
 }
 
