@@ -203,8 +203,7 @@ sequenceDiagram
 ├── powerplatform/
 │   ├── solution/src/             Unpacked, source-controlled solution
 │   │   ├── Other/                Solution.xml, Customizations.xml, Relationships.xml
-│   │   ├── Workflows/            The cloud flow definition (Logic App JSON + metadata)
-│   │   └── environmentvariabledefinitions/
+│   │   └── Workflows/            The cloud flow definition (Logic App JSON + metadata)
 │   ├── canvas-app/src/           Power Fx YAML source for the canvas app
 │   └── config/
 │       └── deploymentSettings.template.json

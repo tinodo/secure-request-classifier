@@ -537,6 +537,12 @@ jobs:
         shell: pwsh
         run: ./scripts/Build-Solution.ps1 -SolutionType Unmanaged
 
+      # Fail here rather than 10 minutes later inside Dataverse, which reports a malformed
+      # package only as "An unexpected error occurred".
+      - name: The package must be a clean SolutionPackager package
+        shell: pwsh
+        run: ./scripts/Test-SolutionPackage.ps1
+
       - name: Render deployment settings
         shell: pwsh
         env:

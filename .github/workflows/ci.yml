@@ -91,6 +91,13 @@ jobs:
         shell: pwsh
         run: ./scripts/Build-Solution.ps1
 
+      # `pac solution pack` exits 0 even when it silently copies Git-integration component
+      # folders into the zip instead of folding them into customizations.xml. Dataverse only
+      # reports that as "An unexpected error occurred", so it has to be caught here.
+      - name: The package must be a clean SolutionPackager package
+        shell: pwsh
+        run: ./scripts/Test-SolutionPackage.ps1
+
       - name: Validate the flow definition is well-formed JSON
         shell: pwsh
         run: |

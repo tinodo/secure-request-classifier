@@ -1,8 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Element order and casing below are significant: SolutionPackager expects every element to be
-  present (even when empty) and in this exact sequence. "optionsets" and "connectionreferences"
-  are intentionally lowercase; everything else is PascalCase.
+  present (even when empty) and in this exact sequence. "optionsets", "connectionreferences" and
+  "environmentvariabledefinitions" are intentionally lowercase; everything else is PascalCase.
+
+  Every component that is not written to its own file by `pac solution unpack` has to live in
+  this file. There are two different on-disk solution formats and they must not be mixed:
+
+    * SolutionPackager format  - what `pac solution pack/unpack` reads and writes, and what this
+                                 folder uses. Connection references and environment variable
+                                 definitions stay INLINE in this file.
+    * Git integration format   - what Power Platform Git integration writes. Components are
+                                 split into per-component folders such as
+                                 environmentvariabledefinitions/<schemaname>/.
+
+  Putting Git-integration folders into a SolutionPackager source tree is silently tolerated by
+  `pac solution pack`: the files are copied into the zip verbatim instead of being folded into
+  customizations.xml. Dataverse then tries to read them with its source-control handler and the
+  import dies with "An unexpected error occurred", whose real text is
+
+      System.InvalidOperationException: The specified node cannot be inserted as the valid child
+      of this node, because the specified node is the wrong type.
+         at System.Xml.XmlNode.AppendChild(XmlNode newChild)
+         at Microsoft.Crm.Tools.ImportExportPublish.SourceControlHandler.ImportEntityFromFile(...)
+
+  scripts/Test-SolutionPackage.ps1 fails the build if that ever comes back.
 -->
 <ImportExportXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <Entities />
@@ -46,6 +68,65 @@
       <statuscode>1</statuscode>
     </connectionreference>
   </connectionreferences>
+  <!--
+    type 100000000 is String. The values are not set here: they are supplied per environment by
+    powerplatform/config/deploymentSettings.template.json, rendered by
+    scripts/New-DeploymentSettings.ps1 and passed to the import as the deployment settings file.
+  -->
+  <environmentvariabledefinitions>
+    <environmentvariabledefinition schemaname="srcls_EnvironmentLabel">
+      <displayname default="Environment label">
+        <label description="Environment label" languagecode="1033" />
+      </displayname>
+      <description default="Friendly label shown in the confirmation email, for example Demo or Contoso Sandbox.">
+        <label description="Friendly label shown in the confirmation email, for example Demo or Contoso Sandbox." languagecode="1033" />
+      </description>
+      <introducedversion>1.0.0.0</introducedversion>
+      <iscustomizable>1</iscustomizable>
+      <isrequired>0</isrequired>
+      <secretstore>0</secretstore>
+      <type>100000000</type>
+    </environmentvariabledefinition>
+    <environmentvariabledefinition schemaname="srcls_FunctionApplicationIdUri">
+      <displayname default="Function Application ID URI">
+        <label description="Function Application ID URI" languagecode="1033" />
+      </displayname>
+      <description default="Application ID URI of the Microsoft Entra ID app registration protecting the Function App, for example api://00000000-0000-0000-0000-000000000000. Used when creating the HTTP with Microsoft Entra ID connection.">
+        <label description="Application ID URI of the Microsoft Entra ID app registration protecting the Function App, for example api://00000000-0000-0000-0000-000000000000. Used when creating the HTTP with Microsoft Entra ID connection." languagecode="1033" />
+      </description>
+      <introducedversion>1.0.0.0</introducedversion>
+      <iscustomizable>1</iscustomizable>
+      <isrequired>1</isrequired>
+      <secretstore>0</secretstore>
+      <type>100000000</type>
+    </environmentvariabledefinition>
+    <environmentvariabledefinition schemaname="srcls_FunctionBaseUrl">
+      <displayname default="Function base URL">
+        <label description="Function base URL" languagecode="1033" />
+      </displayname>
+      <description default="Base URL of the private Azure Function App, for example https://func-srclass-demo-ab12cd.azurewebsites.net. Resolves to a private IP address from the Power Platform delegated subnet.">
+        <label description="Base URL of the private Azure Function App, for example https://func-srclass-demo-ab12cd.azurewebsites.net. Resolves to a private IP address from the Power Platform delegated subnet." languagecode="1033" />
+      </description>
+      <introducedversion>1.0.0.0</introducedversion>
+      <iscustomizable>1</iscustomizable>
+      <isrequired>1</isrequired>
+      <secretstore>0</secretstore>
+      <type>100000000</type>
+    </environmentvariabledefinition>
+    <environmentvariabledefinition schemaname="srcls_FunctionClassifyPath">
+      <displayname default="Function classify path">
+        <label description="Function classify path" languagecode="1033" />
+      </displayname>
+      <description default="Path of the classification endpoint. Defaults to /api/requests/classify.">
+        <label description="Path of the classification endpoint. Defaults to /api/requests/classify." languagecode="1033" />
+      </description>
+      <introducedversion>1.0.0.0</introducedversion>
+      <iscustomizable>1</iscustomizable>
+      <isrequired>1</isrequired>
+      <secretstore>0</secretstore>
+      <type>100000000</type>
+    </environmentvariabledefinition>
+  </environmentvariabledefinitions>
   <Languages>
     <Language>1033</Language>
   </Languages>

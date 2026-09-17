@@ -220,16 +220,49 @@ Then re-run the Deploy workflow. See [limitations.md](limitations.md#2-the-conne
 
 ### This is benign.
 
-SolutionPackager emits it for connection references and environment variable definitions, which are packed as separate component files rather than inside `customizations.xml`. Verify:
+SolutionPackager does not index connection references or environment variable definitions when it
+matches root components, so it reports them as missing even when they are correctly declared. A
+solution folder produced by `pac solution unpack` — the canonical layout — prints the same
+warning. Verify the package instead:
 
 ```powershell
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [System.IO.Compression.ZipFile]::OpenRead('powerplatform/out/SecureRequestClassifier.zip')
-$zip.Entries | Select-Object FullName
-$zip.Dispose()
+./scripts/Build-Solution.ps1
+./scripts/Test-SolutionPackage.ps1
 ```
 
-You will see `customizations.xml` containing both connection references, and one `environmentvariabledefinitions/<name>/environmentvariabledefinition.xml` per variable.
+You should see exactly four entries — `solution.xml`, `customizations.xml`, `[Content_Types].xml`
+and `Workflows/<flow>.json` — and nothing else.
+
+---
+
+## The solution import fails with "An unexpected error occurred"
+
+### Usually a mixed on-disk solution format.
+
+`pac solution import` reports every asynchronous failure with that one sentence. The real reason is
+recorded in Dataverse; the Deploy workflow prints it automatically from
+`scripts/Get-SolutionImportFailure.ps1`. If it reads
+
+```
+System.InvalidOperationException: The specified node cannot be inserted as the valid child of this
+node, because the specified node is the wrong type.
+   at System.Xml.XmlNode.AppendChild(XmlNode newChild)
+   at Microsoft.Crm.Tools.ImportExportPublish.SourceControlHandler.ImportEntityFromFile(...)
+```
+
+then the package mixes the two on-disk solution formats:
+
+| Format | Written by | Components |
+| --- | --- | --- |
+| SolutionPackager | `pac solution pack` / `unpack` — used by this repository | inline in `Other/Customizations.xml` |
+| Git integration | Power Platform Git integration | split into `environmentvariabledefinitions/<schemaname>/` and similar folders |
+
+`pac solution pack` does not reject a Git-integration folder found in a SolutionPackager source
+tree. It copies it into the zip verbatim, exits 0, and Dataverse then crashes trying to read it.
+
+Fix it by moving the component inline into `powerplatform/solution/src/Other/Customizations.xml`
+and deleting the folder. `scripts/Test-SolutionPackage.ps1` runs in CI and in the Deploy workflow
+to catch this before the import.
 
 ---
 

@@ -76,9 +76,24 @@ foreach ($output in $referencedOutputs) {
 # 2. Environment variable definitions, deployment settings and the flow must agree
 # ---------------------------------------------------------------------------------------------
 
-$definitionFolders = Get-ChildItem `
-    -Path (Join-Path $RepositoryRoot 'powerplatform/solution/src/environmentvariabledefinitions') `
-    -Directory | ForEach-Object { $_.Name }
+# The definitions live inline in Customizations.xml. They must NOT be split into
+# environmentvariabledefinitions/<schemaname>/ folders: that is the Power Platform Git
+# integration layout, and SolutionPackager copies it into the zip verbatim instead of folding it
+# into customizations.xml, which makes the Dataverse import fail. See Test-SolutionPackage.ps1.
+$gitFormatFolder = Join-Path $RepositoryRoot 'powerplatform/solution/src/environmentvariabledefinitions'
+Assert-True -Name 'Environment variable definitions are not in Git-integration format' `
+    -Condition (-not (Test-Path $gitFormatFolder)) `
+    -Detail "Move $gitFormatFolder inline into Other/Customizations.xml and delete it."
+
+$customizationsXml = [xml](Get-FileText 'powerplatform/solution/src/Other/Customizations.xml')
+
+$definitionNodes = @($customizationsXml.SelectNodes(
+        '/ImportExportXml/environmentvariabledefinitions/environmentvariabledefinition'))
+
+Assert-True -Name 'Customizations.xml declares environment variable definitions' `
+    -Condition ($definitionNodes.Count -gt 0)
+
+$definitionNames = $definitionNodes | ForEach-Object { $_.GetAttribute('schemaname') }
 
 $solutionXml = Get-FileText 'powerplatform/solution/src/Other/Solution.xml'
 $settingsTemplate = Get-FileText 'powerplatform/config/deploymentSettings.template.json'
@@ -86,27 +101,33 @@ $settings = $settingsTemplate | ConvertFrom-Json
 
 $settingsSchemaNames = $settings.EnvironmentVariables | ForEach-Object { $_.SchemaName }
 
-foreach ($name in $definitionFolders) {
+foreach ($name in $definitionNames) {
     Assert-True -Name "Environment variable is registered in Solution.xml: $name" `
         -Condition ($solutionXml -match [regex]::Escape("schemaName=`"$name`""))
 
     Assert-True -Name "Environment variable has a deployment setting: $name" `
         -Condition ($settingsSchemaNames -contains $name)
-
-    $definitionFile = Join-Path $RepositoryRoot "powerplatform/solution/src/environmentvariabledefinitions/$name/environmentvariabledefinition.xml"
-    Assert-True -Name "Environment variable definition file exists: $name" `
-        -Condition (Test-Path $definitionFile)
-
-    if (Test-Path $definitionFile) {
-        $xml = [xml](Get-Content $definitionFile -Raw)
-        Assert-True -Name "Definition schemaname matches its folder: $name" `
-            -Condition ($xml.environmentvariabledefinition.schemaname -eq $name)
-    }
 }
 
 foreach ($name in $settingsSchemaNames) {
     Assert-True -Name "Deployment setting has a matching definition: $name" `
-        -Condition ($definitionFolders -contains $name)
+        -Condition ($definitionNames -contains $name)
+}
+
+# Every connection reference declared in Solution.xml must also be defined inline. Dataverse
+# stores '_' as '_5F' in RootComponent schema names.
+$connectionReferenceNames = @($customizationsXml.SelectNodes(
+        '/ImportExportXml/connectionreferences/connectionreference')) |
+    ForEach-Object { $_.GetAttribute('connectionreferencelogicalname') }
+
+$declaredConnectionReferences = [regex]::Matches(
+    $solutionXml, '<RootComponent\s+type="372"\s+schemaName="(?<name>[^"]+)"') |
+    ForEach-Object { $_.Groups['name'].Value -replace '_5F', '_' }
+
+foreach ($name in $declaredConnectionReferences) {
+    Assert-True -Name "Connection reference is defined in Customizations.xml: $name" `
+        -Condition ($connectionReferenceNames -contains $name) `
+        -Detail "Customizations.xml defines: $($connectionReferenceNames -join ', ')"
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -130,7 +151,7 @@ if ($flowFile) {
         $schemaName = ($parameter -split ' ')[0]
 
         Assert-True -Name "Flow parameter maps to a defined environment variable: $schemaName" `
-            -Condition ($definitionFolders -contains $schemaName)
+            -Condition ($definitionNames -contains $schemaName)
     }
 
     # Every parameter declared must actually be referenced, and vice versa.
