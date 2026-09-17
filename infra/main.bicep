@@ -125,10 +125,15 @@ param storagePublicNetworkAccess string = 'Disabled'
 
 @description('''
 Application (client) ID of the Microsoft Entra ID app registration that represents the
-Function App API. Created by scripts/Initialize-EntraResources.ps1. When empty, App Service
-Authentication is left unconfigured so that a first bootstrap deployment can still succeed.
+Function App API. Created by scripts/Initialize-EntraResources.ps1.
+
+Required, and deliberately has no empty default. It used to default to '', which switched off
+the whole authsettingsV2 resource: omit one secret and the classify endpoint deployed reachable
+by any caller, with only network isolation left. The bootstrap always creates this app
+registration before the first deployment, so there is no case where an empty value is correct.
 ''')
-param apiApplicationId string = ''
+@minLength(36)
+param apiApplicationId string
 
 @description('''
 Application (client) ID of the Microsoft Entra ID application used by the "HTTP with Microsoft

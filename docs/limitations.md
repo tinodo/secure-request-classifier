@@ -199,36 +199,29 @@ Two things worth stating plainly to a customer:
 
 ---
 
-## 5. Managed Environments and the Azure subscription association are prerequisites
+## 5. The Azure subscription association is a tenant prerequisite
 
 ### What cannot be created by this repository
 
-* Enabling **Managed Environments** on the target Power Platform environment.
-* Associating an Azure subscription with the Power Platform tenant.
-
-### Why
-
-Both are tenant-administration actions that logically precede any workload deployment.
-
-> To enable virtual network support for Power Platform, environments must be managed environments.
-> — [Set up VNet support](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-setup-configure)
+Associating an Azure subscription with the Power Platform tenant.
 
 > Is linking an Azure subscription to my Power Platform tenant necessary to activate VNet support? **Yes**, to enable VNet support for Power Platform environments, you must associate an Azure subscription with the Power Platform tenant.
 > — [VNet support overview, FAQ](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-overview)
 
-The FAQ entry states the requirement but publishes no procedure. The only documented Azure-subscription-to-Power-Platform link construct is a [pay-as-you-go billing policy](https://learn.microsoft.com/en-us/power-platform/admin/pay-as-you-go-overview), which does have a [REST API](https://learn.microsoft.com/en-us/rest/api/power-platform/licensing/billing-policy/create-billing-policy).
+The FAQ states the requirement but publishes no procedure. The only documented Azure-subscription-to-Power-Platform link construct is a [pay-as-you-go billing policy](https://learn.microsoft.com/en-us/power-platform/admin/pay-as-you-go-overview), which does have a [REST API](https://learn.microsoft.com/en-us/rest/api/power-platform/licensing/billing-policy/create-billing-policy).
 
 ### Smallest manual action
 
-Managed Environments **is** scriptable and is documented in `docs/deployment.md`:
+A one-time tenant action performed in the Power Platform admin center.
 
-```powershell
-pac admin set-governance-config --environment <environment-id> --protection-level Standard
-```
+### Managed Environments is *not* a manual step
 
-Requires the Power Platform Administrator or Dynamics 365 Administrator role. Dataverse is required for Production, Sandbox and Trial environment types.
+It used to be listed here. It is now automated: `scripts/New-PowerPlatformEnvironment.ps1` creates the environment, waits for its Dataverse database, and enables Managed Environments over the Business Application Platform API, which VNet support requires:
 
-The subscription association is a one-time tenant action performed in the Power Platform admin center.
+> To enable virtual network support for Power Platform, environments must be managed environments.
+> — [Set up VNet support](https://learn.microsoft.com/en-us/power-platform/admin/vnet-support-setup-configure)
+
+The calling identity still needs the Power Platform Administrator or Dynamics 365 Administrator role — that part is a tenant grant, not something a workload can give itself. `-SkipManagedEnvironment` exists for environments where it is managed centrally, and warns that VNet support will not work without it.
 
 ---
 

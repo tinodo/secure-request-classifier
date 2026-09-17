@@ -51,10 +51,11 @@ param instanceMemoryMB int = 2048
 
 @description('''
 Application (client) ID of the Microsoft Entra ID app registration that represents this API.
-When empty, App Service Authentication is not configured - useful only for a first bootstrap
-pass before the app registration exists.
+Required, with no default: an empty value used to silently skip the authsettingsV2 resource
+below and deploy the API unauthenticated. See the same parameter in main.bicep.
 ''')
-param apiApplicationId string = ''
+@minLength(36)
+param apiApplicationId string
 
 @description('Tenant ID used to build the OpenID Connect issuer for token validation.')
 param tenantId string = tenant().tenantId
@@ -81,7 +82,9 @@ param businessDayEndUtcHour int = 17
 @description('Resource tags.')
 param tags object = {}
 
-var configureAuthentication = !empty(apiApplicationId)
+// Authentication is unconditional now, so this is always true. Kept as an output because
+// Test-Deployment.ps1 and the workflow summary both report on it.
+var configureAuthentication = true
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2024-01-01' existing = {
   name: storageAccountName
@@ -187,7 +190,13 @@ resource appSettings 'Microsoft.Web/sites/config@2024-04-01' = {
 
 // App Service Authentication configured as a pure token validator: there is no
 // clientSecretSettingName, because no sign-in flow is ever initiated by the API itself.
-resource authSettings 'Microsoft.Web/sites/config@2024-04-01' = if (configureAuthentication) {
+//
+// Deliberately NOT conditional. This used to be `if (configureAuthentication)`, where
+// configureAuthentication was `!empty(apiApplicationId)` and apiApplicationId defaulted to ''.
+// One unset secret therefore deployed a Function App with authentication switched off entirely,
+// leaving network isolation as the only control. Authentication is now unconditional, so the
+// worst an empty value can do is fail the deployment.
+resource authSettings 'Microsoft.Web/sites/config@2024-04-01' = {
   parent: functionApp
   name: 'authsettingsV2'
   properties: {

@@ -6,8 +6,12 @@
   The flow is deliberately imported in Draft state. Activation requires both connection
   references to resolve to real connections, and the "HTTP with Microsoft Entra ID
   (preauthorized)" connection is a delegated-user connection that has to be created once by a
-  human (see docs/limitations.md). The deployment workflow turns the flow on once the
-  deployment settings file supplies both connection IDs.
+  human (see docs/limitations.md).
+
+  NOTE: nothing in the pipeline turns the flow on. Once the connections exist and the deployment
+  settings file binds them, activate it from Power Automate, or with
+      pac flow enable --environment <url> --flow 8f3a1c22-6d51-4f0b-9c7e-2a4b6d8e1f30
+  An earlier version of this comment claimed the deployment workflow did it. It never has.
 -->
 <Workflow WorkflowId="{8f3a1c22-6d51-4f0b-9c7e-2a4b6d8e1f30}" Name="Classify and Notify" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <JsonFileName>/Workflows/ClassifyAndNotify-8F3A1C22-6D51-4F0B-9C7E-2A4B6D8E1F30.json</JsonFileName>

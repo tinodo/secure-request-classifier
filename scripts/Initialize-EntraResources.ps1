@@ -494,11 +494,24 @@ $subjects = [ordered]@{
         Subject     = "${subjectPrefix}:ref:refs/heads/$DefaultBranch"
         Description = "GitHub Actions on the $DefaultBranch branch of $GitHubRepository"
     }
-    'github-pull-request'          = @{
-        Subject     = "${subjectPrefix}:pull_request"
-        Description = "GitHub Actions for pull requests in $GitHubRepository (validation only)"
-    }
 }
+
+# Deliberately NO ':pull_request' subject.
+#
+# This identity holds Contributor AND Role Based Access Control Administrator at subscription
+# scope, plus Power Platform Administrator and Dataverse System Administrator. A pull_request
+# federated credential is not gated by a GitHub environment, so it bypasses the approval that
+# every deploy job otherwise depends on.
+#
+# Nothing uses it: ci.yml is the only pull_request-triggered workflow and it declares
+# `permissions: contents: read` with no id-token. GitHub also withholds id-token:write from
+# fork-triggered pull_request runs, so it was not exploitable as things stood. But it left the
+# repository one line of YAML away from handing subscription-scope RBAC Administrator to
+# unreviewed code -- adding `id-token: write` to a PR job to run `bicep what-if` would do it --
+# and that is far too sharp an edge to publish.
+#
+# If a PR ever needs Azure, give it its OWN app registration with read-only rights, or run it
+# through a GitHub environment with required reviewers so the environment: subject applies.
 
 foreach ($environmentName in $Environments) {
     $subjects["github-environment-$environmentName"] = @{
@@ -512,6 +525,24 @@ foreach ($name in $subjects.Keys) {
         -Name $name `
         -Subject $subjects[$name].Subject `
         -Description $subjects[$name].Description
+}
+
+# Earlier versions of this script created a ':pull_request' credential. Removing it from the
+# list above does not remove it from an app registration that already has one, so retire it
+# here. Re-running the bootstrap is then enough to close the hole on an existing deployment.
+$retiredCredentialSubjects = @("${subjectPrefix}:pull_request")
+
+$existingCredentials = Invoke-Graph -Method GET `
+    -Uri "$script:GraphBase/applications/$($deploymentApp.id)/federatedIdentityCredentials"
+
+foreach ($credential in @($existingCredentials.value)) {
+    if ($retiredCredentialSubjects -notcontains $credential.subject) { continue }
+
+    Write-Host "    removing retired federated credential '$($credential.name)' ($($credential.subject))" -ForegroundColor Yellow
+    Write-Host '      it bypassed the GitHub environment gate on a subscription-scope identity.' -ForegroundColor Yellow
+
+    Invoke-Graph -Method DELETE `
+        -Uri "$script:GraphBase/applications/$($deploymentApp.id)/federatedIdentityCredentials/$($credential.id)" | Out-Null
 }
 
 # ---------------------------------------------------------------------------------------------

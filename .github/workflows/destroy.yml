@@ -56,8 +56,13 @@ jobs:
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     steps:
       - name: Check the confirmation
+        # Via env, not interpolated into the script body. Only users with write access can set
+        # this, so no trust boundary is crossed either way, but published reference material
+        # should not model injecting an input straight into a shell comparison.
+        env:
+          CONFIRM: ${{ inputs.confirm }}
         run: |
-          if [ "${{ inputs.confirm }}" != "DESTROY" ]; then
+          if [ "$CONFIRM" != "DESTROY" ]; then
             echo "::error::Confirmation text did not match. Type DESTROY to proceed."
             exit 1
           fi

@@ -209,11 +209,16 @@ sequenceDiagram
 │       └── deploymentSettings.template.json
 ├── scripts/
 │   ├── Initialize-EntraResources.ps1       One-time bootstrap, creates no secrets
+│   ├── New-PowerPlatformEnvironment.ps1    Creates/adopts the environment, enables Managed Environments
+│   ├── Resolve-PowerPlatformEnvironment.ps1 Resolves the environment by display name, per job
 │   ├── Build-Solution.ps1                  Packs the Power Platform solution
+│   ├── Test-SolutionPackage.ps1            Rejects a package Dataverse cannot import
 │   ├── New-DeploymentSettings.ps1          Renders the deployment settings file
+│   ├── Get-SolutionImportFailure.ps1       Reads the real import error out of Dataverse
 │   ├── Set-FunctionAppDeploymentWindow.ps1 Opens/closes the transient deployment window
 │   ├── Set-PowerPlatformSubnetInjection.ps1 Links the environment to the enterprise policy
 │   ├── Test-Deployment.ps1                 30+ post-deployment assertions
+│   ├── Test-RepositoryConsistency.ps1      Asserts every artefact agrees with every other
 │   ├── Invoke-PrivateConnectivityProbe.ps1 Proves private reachability and public unreachability
 │   ├── Remove-Demo.ps1                     Guarded cleanup
 │   └── Remove-PowerPlatformEnvironment.ps1 Deletes the environment Deploy created
@@ -242,10 +247,10 @@ sequenceDiagram
 * Resource providers `Microsoft.Network`, `Microsoft.Web`, `Microsoft.App`, `Microsoft.Storage`, `Microsoft.PowerPlatform`, `Microsoft.Insights`, `Microsoft.OperationalInsights` — the deploy workflow registers these automatically.
 
 ### Power Platform
-* A Power Platform environment of type **Production**, **Sandbox**, **Developer** or **Default**. Trial and Dataverse for Teams environments are **not** supported by VNet support.
-* The environment must be a **Managed Environment**. This is a hard prerequisite of Power Platform VNet support.
-* An Azure subscription must be associated with the Power Platform tenant.
-* Power Platform Administrator (or Dynamics 365 Administrator) to link the enterprise policy.
+* **The environment is created for you.** The `Provision Power Platform environment` job creates it, waits for its Dataverse database, enables Managed Environments and adds the deployment identity as a Dataverse application user. If an environment with the configured display name already exists it is adopted rather than replaced.
+* Environment type must be **Production**, **Sandbox**, **Developer** or **Default** — Trial and Dataverse for Teams are **not** supported by VNet support. The provisioning script defaults to a supported type; override with `POWER_PLATFORM_ENVIRONMENT_SKU`.
+* An Azure subscription must be associated with the Power Platform tenant. This is a one-time tenant action and is **not** automated — see [docs/limitations.md](docs/limitations.md#5-the-azure-subscription-association-is-a-tenant-prerequisite).
+* Power Platform Administrator (or Dynamics 365 Administrator) is required, both to enable Managed Environments and to link the enterprise policy.
 * The environment's Power Platform geography must have a documented Azure region pair. See [docs/networking-model.md](docs/networking-model.md#region-pairing).
 
 ### Local tooling (only for the one-time bootstrap)

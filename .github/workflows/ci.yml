@@ -287,6 +287,24 @@ jobs:
             fail=1
           fi
 
+          # Authentication must fail CLOSED. apiApplicationId used to default to '', which
+          # switched off the whole authsettingsV2 resource, so one unset secret deployed an API
+          # that accepted any caller. It is now a required parameter in both templates.
+          for template in infra/main.bicep infra/modules/function-app.bicep; do
+            if grep -nE "^param apiApplicationId string[[:space:]]*=" "$template"; then
+              echo "::error::$template gives apiApplicationId a default. It must be required, or an unset secret deploys the API unauthenticated."
+              fail=1
+            fi
+          done
+
+          # No federated identity credential may be scoped to pull_request. The deployment
+          # identity holds Contributor and RBAC Administrator at subscription scope, and a
+          # pull_request subject is not gated by a GitHub environment.
+          if grep -rn ':pull_request"' scripts/Initialize-EntraResources.ps1 | grep -v 'retiredCredentialSubjects'; then
+            echo "::error::A pull_request federated identity credential bypasses the environment approval gate on a subscription-scope identity."
+            fail=1
+          fi
+
           exit $fail
 
       - name: No credential-shaped literals in the repository

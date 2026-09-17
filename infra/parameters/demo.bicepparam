@@ -39,9 +39,12 @@ param createPrivateDnsZoneGroups = true
 
 param deployEnterprisePolicy = true
 
-// Populated by the deployment workflow from the AZURE_API_APP_ID repository variable, which
-// scripts/Initialize-EntraResources.ps1 prints after it creates the app registration.
-param apiApplicationId = ''
+// Required, and intentionally sourced from the environment rather than committed. The deployment
+// workflow passes --parameters apiApplicationId=<AZURE_API_APP_ID secret>, which overrides this;
+// the env-var read is what lets a local `az deployment sub create` and `az bicep build-params`
+// work. There is deliberately no committed default: an empty value used to switch App Service
+// Authentication off entirely.
+param apiApplicationId = readEnvironmentVariable('AZURE_API_APP_ID', '00000000-0000-0000-0000-000000000000')
 
 param businessDayStartUtcHour = 9
 param businessDayEndUtcHour = 17

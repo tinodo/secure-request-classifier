@@ -197,6 +197,18 @@ gh secret set POWER_PLATFORM_CONNECTION_ID_OFFICE365   --body <guid>
 
 Then re-run the Deploy workflow so the solution import binds them.
 
+### Turn the flow on
+
+The solution imports the flow in **Draft**. Nothing in the pipeline activates it, because activation
+only succeeds once both connection references resolve to real connections. After the re-run above:
+
+```powershell
+pac flow enable --environment <environment-url> --flow 8f3a1c22-6d51-4f0b-9c7e-2a4b6d8e1f30
+```
+
+or switch it on from Power Automate. Until then the demo still works — run the flow manually and
+the PowerApps (V2) trigger renders an input form, which exercises the whole private path.
+
 ---
 
 ## 6. Deploy

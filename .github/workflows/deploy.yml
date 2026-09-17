@@ -282,12 +282,20 @@ jobs:
           LOCATION="${{ vars.AZURE_LOCATION || 'westeurope' }}"
           DEPLOYMENT_NAME="srclass-$(date +%Y%m%d%H%M%S)"
 
+          # AZURE_API_APP_ID is not optional. It used to be appended only when set, and an unset
+          # secret then produced a Function App with App Service Authentication switched off
+          # entirely. Fail here, with a message that says what to do, rather than deploying an
+          # unauthenticated API.
+          if [ -z "$API_APP_ID" ]; then
+            echo "::error::AZURE_API_APP_ID is not set. It is required: without it the Function App would deploy with no authentication. Run scripts/Initialize-EntraResources.ps1 and set the secrets it prints."
+            exit 1
+          fi
+
           # Each flag and its value must be SEPARATE array elements. Building them as
           # "apiApplicationId=x" and then prefixing with "${EXTRA_PARAMS[@]/#/--parameters }"
           # produces one argument containing a space, which az reads as a parameter literally
           # named "--parameters apiApplicationId" and rejects.
-          EXTRA_PARAMS=()
-          [ -n "$API_APP_ID" ] && EXTRA_PARAMS+=(--parameters "apiApplicationId=$API_APP_ID")
+          EXTRA_PARAMS=(--parameters "apiApplicationId=$API_APP_ID")
           [ -n "${{ vars.POWER_PLATFORM_REGION }}" ] && EXTRA_PARAMS+=(--parameters "powerPlatformRegion=${{ vars.POWER_PLATFORM_REGION }}")
           [ -n "${{ vars.RESOURCE_GROUP_NAME }}" ] && EXTRA_PARAMS+=(--parameters "resourceGroupName=${{ vars.RESOURCE_GROUP_NAME }}")
           [ -n "${{ vars.CREATE_PRIVATE_DNS_ZONES }}" ] && EXTRA_PARAMS+=(--parameters "createPrivateDnsZones=${{ vars.CREATE_PRIVATE_DNS_ZONES }}")

@@ -430,6 +430,24 @@ Assert-True -Name 'Remove-Demo.ps1 tolerates an absent resource group' `
 
 # ---------------------------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------------------------
+# The README documents the scripts folder as a tree. It drifts silently as scripts are added,
+# which is how it came to omit several of them. Assert every script is listed.
+# ---------------------------------------------------------------------------------------------
+
+$readme = Get-FileText 'README.md'
+
+$scriptFiles = Get-ChildItem -Path (Join-Path $RepositoryRoot 'scripts') -Filter '*.ps1' -File |
+    ForEach-Object { $_.Name }
+
+foreach ($script in $scriptFiles) {
+    Assert-True -Name "README lists scripts/$script" `
+        -Condition ($readme -match [regex]::Escape($script)) `
+        -Detail 'Add it to the repository layout tree in README.md.'
+}
+
+# ---------------------------------------------------------------------------------------------
+
 Write-Host ('-' * 70)
 
 if ($script:Failures -eq 0) {
