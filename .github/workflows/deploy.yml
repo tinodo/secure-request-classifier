@@ -143,27 +143,6 @@ jobs:
           include-hidden-files: true
 
   # -------------------------------------------------------------------------------------------
-  # The environment id and url are secrets, and the `secrets` context is NOT available in a
-  # job-level `if:`. This job reduces them to non-sensitive booleans the gates can read, so that
-  # skipping provisioning and falling back to a pre-set environment still works.
-  resolve:
-    name: Resolve optional configuration
-    runs-on: ubuntu-latest
-    environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
-    outputs:
-      has-environment-id: ${{ steps.check.outputs.has-environment-id }}
-      has-environment-url: ${{ steps.check.outputs.has-environment-url }}
-    steps:
-      - name: Check which optional secrets are set
-        id: check
-        env:
-          ENVIRONMENT_ID: ${{ secrets.POWER_PLATFORM_ENVIRONMENT_ID }}
-          ENVIRONMENT_URL: ${{ secrets.POWER_PLATFORM_ENVIRONMENT_URL }}
-        run: |
-          set -euo pipefail
-          [ -n "$ENVIRONMENT_ID" ]  && echo "has-environment-id=true"   >> "$GITHUB_OUTPUT" || echo "has-environment-id=false"   >> "$GITHUB_OUTPUT"
-          [ -n "$ENVIRONMENT_URL" ] && echo "has-environment-url=true"  >> "$GITHUB_OUTPUT" || echo "has-environment-url=false"  >> "$GITHUB_OUTPUT"
-
   # -------------------------------------------------------------------------------------------
   power-platform-environment:
     name: Provision Power Platform environment
@@ -171,9 +150,10 @@ jobs:
     if: ${{ (github.event_name != 'workflow_dispatch' || inputs.provision-power-platform-environment) }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
-    outputs:
-      environment-id: ${{ steps.provision.outputs.environmentId }}
-      environment-url: ${{ steps.provision.outputs.instanceUrl }}
+    # No environment-id / environment-url outputs. Both are masked, and GitHub redacts a job
+    # output whose value contains a registered secret, so they would arrive empty. Each
+    # consuming job resolves the environment for itself from the display name instead, with
+    # scripts/Resolve-PowerPlatformEnvironment.ps1.
     steps:
       - uses: actions/checkout@v5
 
@@ -215,11 +195,10 @@ jobs:
           "environmentId=$($result.environmentId)" >> $env:GITHUB_OUTPUT
           "instanceUrl=$($result.instanceUrl)"     >> $env:GITHUB_OUTPUT
 
-      # The environment id and url are deliberately NOT written back to the repository. Writing
-      # them to repository variables leaked them into public run logs, and GITHUB_TOKEN cannot
-      # write variables or secrets anyway. Provisioning adopts the existing environment by
-      # display name on every run, so nothing needs to persist between runs. Only when you skip
-      # provisioning do you set the POWER_PLATFORM_ENVIRONMENT_ID / _URL secrets yourself.
+      # The environment id and url are NOT written back to the repository, and are NOT published
+      # as job outputs. Both are masked, and GitHub redacts any job output whose value contains a
+      # registered secret, so they would arrive empty. Each later stage resolves the environment
+      # for itself from the display name with scripts/Resolve-PowerPlatformEnvironment.ps1.
 
       - name: Summarise
         run: |
@@ -458,12 +437,10 @@ jobs:
   # -------------------------------------------------------------------------------------------
   link-enterprise-policy:
     name: Link Power Platform to the virtual network
-    needs: [infrastructure, power-platform-environment, resolve]
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.link-enterprise-policy) && needs.infrastructure.result == 'success' && (needs.power-platform-environment.outputs.environment-id != '' || needs.resolve.outputs.has-environment-id == 'true') }}
+    needs: [infrastructure, power-platform-environment]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.link-enterprise-policy) && needs.infrastructure.result == 'success' }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
-    env:
-      ENVIRONMENT_ID: ${{ needs.power-platform-environment.outputs.environment-id || secrets.POWER_PLATFORM_ENVIRONMENT_ID }}
     steps:
       - uses: actions/checkout@v5
 
@@ -473,6 +450,14 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve the Power Platform environment
+        id: environment
+        shell: pwsh
+        run: |
+          ./scripts/Resolve-PowerPlatformEnvironment.ps1 `
+            -DisplayName '${{ vars.POWER_PLATFORM_ENVIRONMENT_NAME || 'srclass-demo' }}' `
+            -Required | Out-Null
 
       - name: Install the Power Platform enterprise policies module
         shell: pwsh
@@ -491,6 +476,7 @@ jobs:
           SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           RESOURCE_GROUP: ${{ needs.infrastructure.outputs.resource-group }}
           POLICY_NAME: ${{ needs.infrastructure.outputs.enterprise-policy-name }}
+          ENVIRONMENT_ID: ${{ steps.environment.outputs.environment-id }}
         run: |
           if (-not $env:POLICY_NAME) {
             Write-Host '::notice::No enterprise policy was deployed; nothing to link.'
@@ -509,16 +495,29 @@ jobs:
   # -------------------------------------------------------------------------------------------
   power-platform:
     name: Deploy Power Platform solution
-    needs: [infrastructure, deploy-function, power-platform-environment, resolve]
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.deploy-power-platform) && needs.infrastructure.result == 'success' && (needs.power-platform-environment.outputs.environment-url != '' || needs.resolve.outputs.has-environment-url == 'true') }}
+    needs: [infrastructure, deploy-function, power-platform-environment]
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.deploy-power-platform) && needs.infrastructure.result == 'success' }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
-    env:
-      ENVIRONMENT_URL: ${{ needs.power-platform-environment.outputs.environment-url || secrets.POWER_PLATFORM_ENVIRONMENT_URL }}
     steps:
       - uses: actions/checkout@v5
 
       - uses: microsoft/powerplatform-actions/actions-install@v1
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve the Power Platform environment
+        id: environment
+        shell: pwsh
+        run: |
+          ./scripts/Resolve-PowerPlatformEnvironment.ps1 `
+            -DisplayName '${{ vars.POWER_PLATFORM_ENVIRONMENT_NAME || 'srclass-demo' }}' `
+            -Required | Out-Null
 
       - name: Pack the solution
         shell: pwsh
@@ -542,7 +541,7 @@ jobs:
         # client-secret is deliberately omitted. There is no secret in this repository.
         uses: microsoft/powerplatform-actions/import-solution@v1
         with:
-          environment-url: ${{ env.ENVIRONMENT_URL }}
+          environment-url: ${{ steps.environment.outputs.environment-url }}
           app-id: ${{ secrets.POWER_PLATFORM_APP_ID }}
           tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
           solution-file: powerplatform/out/SecureRequestClassifier.zip
@@ -574,8 +573,6 @@ jobs:
     if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run-verification) && needs.infrastructure.result == 'success' }}
     runs-on: ubuntu-latest
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
-    env:
-      ENVIRONMENT_ID: ${{ needs.power-platform-environment.outputs.environment-id || secrets.POWER_PLATFORM_ENVIRONMENT_ID }}
     steps:
       - uses: actions/checkout@v5
 
@@ -586,14 +583,27 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve the Power Platform environment
+        id: environment
+        shell: pwsh
+        run: |
+          ./scripts/Resolve-PowerPlatformEnvironment.ps1 `
+            -DisplayName '${{ vars.POWER_PLATFORM_ENVIRONMENT_NAME || 'srclass-demo' }}' | Out-Null
+
       - name: Verify the deployment
         shell: pwsh
+        env:
+          ENVIRONMENT_ID: ${{ steps.environment.outputs.environment-id }}
+          ENVIRONMENT_URL: ${{ steps.environment.outputs.environment-url }}
         run: |
           $parameters = @{
             ResourceGroupName = '${{ needs.infrastructure.outputs.resource-group }}'
           }
           if ($env:ENVIRONMENT_ID) {
             $parameters.PowerPlatformEnvironmentId = $env:ENVIRONMENT_ID
+          }
+          if ($env:ENVIRONMENT_URL) {
+            $parameters.PowerPlatformEnvironmentUrl = $env:ENVIRONMENT_URL
           }
           ./scripts/Test-Deployment.ps1 @parameters
 

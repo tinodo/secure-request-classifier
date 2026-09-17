@@ -289,8 +289,6 @@ Settings → Secrets and variables → Actions → *Secrets*:
 | `POWER_PLATFORM_APP_ID` | for solution import | same as `AZURE_CLIENT_ID` |
 | `POWER_PLATFORM_TENANT_ID` | for solution import | same as `AZURE_TENANT_ID` |
 | `POWER_PLATFORM_ADMIN_OBJECT_ID` | recommended | object id that will link the policy |
-| `POWER_PLATFORM_ENVIRONMENT_URL` | only if you skip provisioning | `https://contoso.crm4.dynamics.com` |
-| `POWER_PLATFORM_ENVIRONMENT_ID` | only if you skip provisioning | `55555555-…` |
 | `POWER_PLATFORM_CONNECTION_ID_*` | optional | see [docs/limitations.md](docs/limitations.md) |
 
 Settings → Secrets and variables → Actions → *Variables* (non-sensitive configuration):
@@ -298,10 +296,14 @@ Settings → Secrets and variables → Actions → *Variables* (non-sensitive co
 | Variable | Required | Example |
 | --- | --- | --- |
 | `POWER_PLATFORM_REGION` | recommended | `europe` |
+| `POWER_PLATFORM_ENVIRONMENT_NAME` | optional | `srclass-demo` (default) |
 | `AZURE_LOCATION` | optional | `westeurope` |
 | `FUNCTION_DEPLOY_MODE` | optional | `deployment-window` (default) or `private-runner` |
 
-`POWER_PLATFORM_ENVIRONMENT_ID` and `POWER_PLATFORM_ENVIRONMENT_URL` are normally **not** set by hand. The Deploy workflow provisions the environment and passes both to the later jobs as job outputs. Set them yourself only when you run Deploy with `provision-power-platform-environment` unticked.
+You never supply the environment ID or Dataverse URL. The Deploy workflow provisions the
+environment and each later stage resolves it by display name. They are deliberately not passed
+between jobs: both are masked, and GitHub redacts any job output whose value contains a secret,
+so passing them that way would silently yield an empty string.
 
 The full table, including the Azure Landing Zone switches, is in [docs/deployment.md](docs/deployment.md#configuration-reference).
 

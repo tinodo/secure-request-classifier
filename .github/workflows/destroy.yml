@@ -51,8 +51,18 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve the Power Platform environment
+        id: environment
+        shell: pwsh
+        run: |
+          ./scripts/Resolve-PowerPlatformEnvironment.ps1 `
+            -DisplayName '${{ vars.POWER_PLATFORM_ENVIRONMENT_NAME || 'srclass-demo' }}' | Out-Null
+
       - name: Remove the demo
         shell: pwsh
+        env:
+          ENVIRONMENT_ID: ${{ steps.environment.outputs.environment-id }}
+          ENVIRONMENT_URL: ${{ steps.environment.outputs.environment-url }}
         run: |
           $parameters = @{
             ResourceGroupName = '${{ vars.RESOURCE_GROUP_NAME || 'rg-srclass-demo' }}'
@@ -60,12 +70,12 @@ jobs:
             Confirm           = $false
           }
 
-          if ('${{ inputs.unlink-power-platform }}' -eq 'true' -and '${{ secrets.POWER_PLATFORM_ENVIRONMENT_ID }}') {
-            $parameters.PowerPlatformEnvironmentId = '${{ secrets.POWER_PLATFORM_ENVIRONMENT_ID }}'
+          if ('${{ inputs.unlink-power-platform }}' -eq 'true' -and $env:ENVIRONMENT_ID) {
+            $parameters.PowerPlatformEnvironmentId = $env:ENVIRONMENT_ID
           }
 
-          if ('${{ secrets.POWER_PLATFORM_ENVIRONMENT_URL }}') {
-            $parameters.PowerPlatformEnvironmentUrl = '${{ secrets.POWER_PLATFORM_ENVIRONMENT_URL }}'
+          if ($env:ENVIRONMENT_URL) {
+            $parameters.PowerPlatformEnvironmentUrl = $env:ENVIRONMENT_URL
           }
 
           if ('${{ inputs.remove-entra-applications }}' -eq 'true') {

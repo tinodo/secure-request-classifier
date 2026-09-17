@@ -89,10 +89,8 @@ deliberately configure a pre-existing environment.
 Trial environments and Dataverse for Teams do not support VNet support — use Sandbox,
 Production or Developer.
 
-It ends by printing `POWER_PLATFORM_ENVIRONMENT_ID` and `POWER_PLATFORM_ENVIRONMENT_URL`. You only
-need to store them if you intend to skip the provisioning stage on later runs — the Deploy
-workflow otherwise resolves the environment itself and hands both values to the later jobs as
-job outputs.
+It ends by printing the environment ID and Dataverse URL for reference. You do not need to store
+them anywhere: every deployment stage resolves the environment by display name at run time.
 
 ---
 
@@ -132,11 +130,15 @@ Settings → Secrets and variables → Actions → *Secrets*.
 
 | Secret | Purpose |
 | --- | --- |
-| `POWER_PLATFORM_ENVIRONMENT_ID` | Only when you run Deploy with `provision-power-platform-environment` unticked. Normally the workflow provisions the environment and passes this to later jobs as a job output |
-| `POWER_PLATFORM_ENVIRONMENT_URL` | As above, for the solution import stage |
 | `POWER_PLATFORM_SECURITY_GROUP_ID` | Restrict environment access to a security group |
 | `POWER_PLATFORM_CONNECTION_ID_WEBCONTENTS` | Connection ID for the connector (see step 5) |
 | `POWER_PLATFORM_CONNECTION_ID_OFFICE365` | Connection ID for Office 365 Outlook |
+
+You never supply the environment ID or Dataverse URL. Each stage that needs them resolves the
+environment by display name with `scripts/Resolve-PowerPlatformEnvironment.ps1`. They are
+deliberately not handed between jobs: both are masked, and GitHub redacts any job output whose
+value contains a registered secret, so a job output would silently arrive empty and the
+consuming step would fail with a confusing error such as `EnvironmentNotFound`.
 
 ### Optional variables
 

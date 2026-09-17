@@ -531,40 +531,20 @@ else {
 
 # ---------------------------------------------------------------------------------------------
 
-Write-Step 'Done. Configure these as GitHub repository SECRETS'
+Write-Step 'Done. The environment is ready'
 
-# These are tenant-specific identifiers. They are configured as SECRETS, not variables, because
-# GitHub masks secrets in run logs and step summaries but does NOT mask variables — and this
-# repository is intended to be public.
-$secrets = [ordered]@{
-    POWER_PLATFORM_ENVIRONMENT_ID  = $environmentId
-    POWER_PLATFORM_ENVIRONMENT_URL = $instanceUrl
-}
-
-# Non-sensitive configuration stays a variable.
-$variables = [ordered]@{
-    POWER_PLATFORM_REGION = $Location
-}
+# These are printed for reference only. Nothing needs to be stored: every deployment stage
+# resolves the environment by display name at run time with
+# scripts/Resolve-PowerPlatformEnvironment.ps1. They are deliberately never passed between
+# GitHub Actions jobs, because GitHub redacts a job output whose value contains a masked value.
+Write-Host ''
+Write-Host ('  {0,-32} {1}' -f 'Environment ID', $environmentId) -ForegroundColor Green
+Write-Host ('  {0,-32} {1}' -f 'Dataverse URL', $instanceUrl) -ForegroundColor Green
+Write-Host ('  {0,-32} {1}' -f 'Region', $Location) -ForegroundColor Green
 
 Write-Host ''
-foreach ($key in $secrets.Keys) {
-    Write-Host ('  {0,-32} {1}' -f $key, $secrets[$key]) -ForegroundColor Green
-}
-foreach ($key in $variables.Keys) {
-    Write-Host ('  {0,-32} {1}' -f $key, $variables[$key]) -ForegroundColor Green
-}
-
-Write-Host ''
-foreach ($key in $secrets.Keys) {
-    Write-Host "    gh secret set $key --body `"$($secrets[$key])`""
-}
-foreach ($key in $variables.Keys) {
-    Write-Host "    gh variable set $key --body `"$($variables[$key])`""
-}
-
-Write-Host ''
-Write-Host '  Only needed if you run Deploy with provision-power-platform-environment = false;' -ForegroundColor DarkGray
-Write-Host '  otherwise the pipeline resolves the environment itself on every run.' -ForegroundColor DarkGray
+Write-Host '  Nothing to copy into GitHub. Set POWER_PLATFORM_REGION as a repository variable if' -ForegroundColor DarkGray
+Write-Host '  you used a non-default geography.' -ForegroundColor DarkGray
 
 return [pscustomobject] ([ordered]@{
         environmentId     = $environmentId

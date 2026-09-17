@@ -236,6 +236,16 @@ var names = {
   tablePrivateEndpoint: 'pe-table-${baseName}'
 }
 
+// Order matters: the private endpoints below select their zone from this list. Do NOT iterate an
+// object with items() to build that list — items() sorts by key ALPHABETICALLY, not in
+// declaration order, which silently attaches each private endpoint to the wrong zone.
+var dnsZoneKeys = [
+  'sites'
+  'blob'
+  'queue'
+  'table'
+]
+
 var dnsZoneNames = {
   sites: 'privatelink.azurewebsites.net'
   blob: 'privatelink.blob.${environment().suffixes.storage}'
@@ -320,11 +330,11 @@ var linkedVirtualNetworkIds = deployFailoverNetwork
   : [primaryNetwork.outputs.virtualNetworkId]
 
 module privateDnsZones 'modules/private-dns-zone.bicep' = [
-  for zoneName in items(dnsZoneNames): if (createPrivateDnsZones) {
+  for zoneKey in dnsZoneKeys: if (createPrivateDnsZones) {
     scope: resourceGroupResource
-    name: 'dns-${zoneName.key}'
+    name: 'dns-${zoneKey}'
     params: {
-      zoneName: zoneName.value
+      zoneName: dnsZoneNames[zoneKey]
       virtualNetworkIds: linkedVirtualNetworkIds
       tags: allTags
     }
@@ -447,15 +457,16 @@ module functionPrivateEndpoint 'modules/private-endpoint.bicep' = {
     privateLinkServiceId: functionApp.outputs.functionAppId
     groupId: 'sites'
     // A single `sites` private endpoint covers both the app and its scm host.
-    privateDnsZoneId: createPrivateDnsZoneGroups && createPrivateDnsZones ? privateDnsZones[0]!.outputs.privateDnsZoneId : ''
+    privateDnsZoneId: createPrivateDnsZoneGroups && createPrivateDnsZones ? privateDnsZones[indexOf(dnsZoneKeys, 'sites')]!.outputs.privateDnsZoneId : ''
     tags: allTags
   }
 }
 
+// The zone is resolved by NAME, never by a hard-coded index, so the mapping cannot drift.
 var storagePrivateEndpoints = [
-  { name: names.blobPrivateEndpoint, groupId: 'blob', zoneIndex: 1 }
-  { name: names.queuePrivateEndpoint, groupId: 'queue', zoneIndex: 2 }
-  { name: names.tablePrivateEndpoint, groupId: 'table', zoneIndex: 3 }
+  { name: names.blobPrivateEndpoint, groupId: 'blob' }
+  { name: names.queuePrivateEndpoint, groupId: 'queue' }
+  { name: names.tablePrivateEndpoint, groupId: 'table' }
 ]
 
 module storagePrivateEndpointModules 'modules/private-endpoint.bicep' = [
@@ -469,7 +480,7 @@ module storagePrivateEndpointModules 'modules/private-endpoint.bicep' = [
       privateLinkServiceId: storage.outputs.storageAccountId
       groupId: pe.groupId
       privateDnsZoneId: createPrivateDnsZoneGroups && createPrivateDnsZones
-        ? privateDnsZones[pe.zoneIndex]!.outputs.privateDnsZoneId
+        ? privateDnsZones[indexOf(dnsZoneKeys, pe.groupId)]!.outputs.privateDnsZoneId
         : ''
       tags: allTags
     }

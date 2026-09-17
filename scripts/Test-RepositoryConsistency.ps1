@@ -289,6 +289,42 @@ foreach ($file in @('infra/main.bicep', 'scripts/Initialize-EntraResources.ps1',
 }
 
 # ---------------------------------------------------------------------------------------------
+# 12. Private endpoints must select their DNS zone by name, never by a positional index
+# ---------------------------------------------------------------------------------------------
+
+# Regression guard. The private DNS zone modules were once built with `items(dnsZoneNames)`,
+# and items() sorts by key ALPHABETICALLY rather than in declaration order. Combined with
+# hard-coded zoneIndex values that assumed declaration order, every private endpoint was
+# attached to the wrong zone: blob got the queue zone, the function app got the blob zone. The
+# deployment still succeeded, so nothing failed until name resolution was attempted at runtime.
+
+Assert-True -Name 'main.bicep does not build the DNS zone list with items()' `
+    -Condition ($mainBicep -notmatch 'items\(\s*dnsZoneNames\s*\)')
+
+Assert-True -Name 'Private endpoints resolve their DNS zone by name via indexOf' `
+    -Condition ($mainBicep -match 'indexOf\(\s*dnsZoneKeys\s*,')
+
+Assert-True -Name 'No private endpoint carries a hard-coded zoneIndex' `
+    -Condition ($mainBicep -notmatch 'zoneIndex')
+
+# ---------------------------------------------------------------------------------------------
+# 13. The environment ID and URL must not cross a job boundary as job outputs
+# ---------------------------------------------------------------------------------------------
+
+# Regression guard. Both values are masked, and GitHub redacts any job output whose value
+# contains a registered secret, so passing them between jobs silently yields an empty string.
+# Each job resolves the environment for itself instead.
+
+Assert-True -Name 'deploy.yml does not publish the environment id as a job output' `
+    -Condition ($deployWorkflow -notmatch '(?m)^\s*environment-id:\s*\$\{\{\s*steps\.')
+
+Assert-True -Name 'deploy.yml resolves the environment with the shared script' `
+    -Condition ($deployWorkflow -match 'Resolve-PowerPlatformEnvironment\.ps1')
+
+Assert-True -Name 'Resolve-PowerPlatformEnvironment.ps1 exists' `
+    -Condition (Test-Path (Join-Path $RepositoryRoot 'scripts/Resolve-PowerPlatformEnvironment.ps1'))
+
+# ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)
 
