@@ -14,11 +14,16 @@ on:
 permissions:
   contents: read
 
-# A branch push and opening a pull request for that branch are two events on the same ref, so
-# both triggers fire and CI runs twice for one commit. Sharing a concurrency group keyed on the
-# ref means the later run cancels the earlier one, leaving a single effective run.
+# A branch push and a pull request for that branch are two events for one commit, so CI is
+# triggered twice. Sharing a concurrency group makes the second run cancel the first, but only if
+# both runs compute the same group name, and github.ref does not: on a push it is
+# refs/heads/<branch>, while on a pull_request it is refs/pull/<number>/merge. Keying on it
+# produced two distinct groups and therefore two concurrent runs, which is the bug this replaces.
+#
+# github.head_ref is the source branch and is set only for pull_request; github.ref_name is the
+# short branch name on a push. Together they yield the same value, <branch>, for both events.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 env:

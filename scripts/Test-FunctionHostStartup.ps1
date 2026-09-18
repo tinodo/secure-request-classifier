@@ -126,6 +126,13 @@ $indexed = @()
 $failure = $null
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 
+# Only two things are terminal: the worker reporting that it could not start, and the host process
+# dying. Everything else has to wait for the deadline, because startup is a sequence of partial
+# states and any one of them read on its own is misleading. In particular the host runs more than
+# one metadata provider and logs a count for each, so "0 functions found" genuinely appears in a
+# perfectly healthy startup -- this project publishes no functions.metadata file, so the custom
+# provider legitimately finds nothing before worker indexing finds everything. Treating that line
+# as a verdict made this check fail against a build that works, which is worse than not having it.
 try {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 3
@@ -135,48 +142,37 @@ try {
             (Get-Content $stderr -ErrorAction SilentlyContinue)
         ) -join "`n"
 
-        if (-not $log) {
-            if ($process.HasExited) {
-                $failure = "The host exited with code $($process.ExitCode) before producing any output."
-                break
+        if ($log) {
+            # The worker failing is reported by the host rather than thrown, so look for it explicitly.
+            foreach ($symptom in @(
+                'Failed to start language worker process',
+                'Exceeded language worker restart retry count',
+                'Unhandled exception',
+                'TypeLoadException',
+                'FileNotFoundException',
+                'MissingMethodException')) {
+
+                if ($log -match [regex]::Escape($symptom)) {
+                    $detail = ($log -split "`n" |
+                        Where-Object { $_ -match 'Unhandled exception|[A-Za-z]Exception:|Failed to start language worker|Exceeded language worker' } |
+                        Select-Object -First 5) -join "`n    "
+                    $failure = "The isolated worker did not start.`n    $detail"
+                    break
+                }
             }
-            continue
+
+            if ($failure) { break }
+
+            $indexed = [regex]::Matches($log, "Host\.Functions\.([A-Za-z0-9_]+)") |
+                ForEach-Object { $_.Groups[1].Value } |
+                Sort-Object -Unique
+
+            # WarmUp is the host's own built-in function and is present even when the worker is
+            # dead, so it must never be mistaken for a sign of success.
+            $indexed = @($indexed | Where-Object { $_ -ne 'WarmUp' })
+
+            if (-not @($expected | Where-Object { $_ -notin $indexed })) { break }
         }
-
-        # The worker failing is reported by the host rather than thrown, so look for it explicitly.
-        foreach ($symptom in @(
-            'Failed to start language worker process',
-            'Exceeded language worker restart retry count',
-            'Unhandled exception',
-            'TypeLoadException',
-            'FileNotFoundException',
-            'MissingMethodException')) {
-
-            if ($log -match [regex]::Escape($symptom)) {
-                $detail = ($log -split "`n" |
-                    Where-Object { $_ -match 'Exception|Failed to start language worker|Exceeded language worker' } |
-                    Select-Object -First 5) -join "`n    "
-                $failure = "The isolated worker did not start.`n    $detail"
-                break
-            }
-        }
-
-        if ($failure) { break }
-
-        if ($log -match '0 functions found') {
-            $failure = 'The host started but indexed no functions at all.'
-            break
-        }
-
-        $indexed = [regex]::Matches($log, "Host\.Functions\.([A-Za-z0-9_]+)") |
-            ForEach-Object { $_.Groups[1].Value } |
-            Sort-Object -Unique
-
-        # WarmUp is the host's own built-in function and is present even when the worker is dead,
-        # so it must never be mistaken for a sign of success.
-        $indexed = @($indexed | Where-Object { $_ -ne 'WarmUp' })
-
-        if ($indexed.Count -ge $expected.Count) { break }
 
         if ($process.HasExited) {
             $failure = "The host exited with code $($process.ExitCode) before indexing finished."
@@ -194,22 +190,36 @@ finally {
 # Report.
 # ---------------------------------------------------------------------------------------------
 
+function Write-HostLog {
+    # The host dumps its whole worker configuration as JSON during startup, which is long enough to
+    # push the interesting lines out of any fixed-size tail. Show the lines that say what happened,
+    # then a tail for context.
+    $lines = @(
+        (Get-Content $stdout -ErrorAction SilentlyContinue)
+        (Get-Content $stderr -ErrorAction SilentlyContinue)
+    )
+
+    Write-Host ''
+    Write-Host '--- host output: relevant lines ---'
+    $lines |
+        Where-Object { $_ -match 'functions found|Found the following|Host\.Functions\.|Unhandled exception|[A-Za-z]Exception:|Failed to start|Exceeded language worker|Worker process|Language Worker' } |
+        ForEach-Object { Write-Host $_ }
+
+    Write-Host ''
+    Write-Host '--- host output: last 30 lines ---'
+    $lines | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
+    Write-Host ''
+}
+
 if ($failure) {
-    Write-Host ''
-    Write-Host '--- host output ---'
-    Get-Content $stdout -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
-    Get-Content $stderr -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
-    Write-Host ''
+    Write-HostLog
     throw "The Functions host could not serve this build. $failure"
 }
 
 $missing = @($expected | Where-Object { $_ -notin $indexed })
 
 if ($missing.Count -gt 0) {
-    Write-Host ''
-    Write-Host '--- host output ---'
-    Get-Content $stdout -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
-    Write-Host ''
+    Write-HostLog
     throw "The host started but did not index: $($missing -join ', '). Indexed: $(if ($indexed) { $indexed -join ', ' } else { '(none)' })."
 }
 
