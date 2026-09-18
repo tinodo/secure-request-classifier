@@ -56,6 +56,15 @@ jobs:
           path: ./TestResults
           if-no-files-found: ignore
 
+      # Building and testing proves the code compiles and behaves. It does not prove the Functions
+      # host can start the isolated worker, which is a separate process that loads the published
+      # assemblies alongside the host's own. When those disagree the worker aborts, the host
+      # indexes nothing, and every route answers 404 while the build and the deployment both stay
+      # green. This step starts the real host and asserts every declared function is registered.
+      - name: The Functions host must index every function
+        shell: pwsh
+        run: ./scripts/Test-FunctionHostStartup.ps1
+
   bicep:
     name: Bicep build and lint
     runs-on: ubuntu-latest

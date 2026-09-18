@@ -553,6 +553,41 @@ foreach ($script in $scriptFiles) {
 }
 
 # ---------------------------------------------------------------------------------------------
+# The Application Insights packages must stay on the same major version
+# ---------------------------------------------------------------------------------------------
+
+# Microsoft.Azure.Functions.Worker.ApplicationInsights binds against Microsoft.ApplicationInsights
+# 2.x. On 3.x the ITelemetryInitializer type it needs is gone, so the isolated worker aborts the
+# moment the host starts it, no functions are indexed, and every route returns 404 -- while the
+# build, the tests and the deployment all still report success. Test-FunctionHostStartup.ps1 is
+# what actually proves the host works; this is the cheap version that explains the constraint at
+# the point somebody would otherwise "helpfully" bump the version.
+
+$functionProject = Get-FileText 'src/function/SecureRequestClassifier.Functions/SecureRequestClassifier.Functions.csproj'
+
+if ($functionProject -match 'Microsoft\.ApplicationInsights\.WorkerService"\s+Version="([^"]+)"') {
+    $insightsVersion = $Matches[1]
+    Assert-True -Name 'Microsoft.ApplicationInsights.WorkerService stays on 2.x' `
+        -Condition ($insightsVersion -like '2.*') `
+        -Detail "Found $insightsVersion. Version 3.x removes Microsoft.ApplicationInsights.Extensibility.ITelemetryInitializer, which Microsoft.Azure.Functions.Worker.ApplicationInsights requires; the worker then crashes at startup and the app serves 404 on every route."
+}
+else {
+    Assert-True -Name 'Microsoft.ApplicationInsights.WorkerService stays on 2.x' `
+        -Condition $false `
+        -Detail 'The package reference was not found in the function project.'
+}
+
+# ---------------------------------------------------------------------------------------------
+# Starting the Functions host must be part of CI
+# ---------------------------------------------------------------------------------------------
+
+$ciWorkflow = Get-FileText '.github/workflows/ci.yml'
+
+Assert-True -Name 'CI starts the Functions host and checks indexing' `
+    -Condition ($ciWorkflow -match 'Test-FunctionHostStartup\.ps1') `
+    -Detail 'Without it, a worker that cannot start ships as a green build that answers 404.'
+
+# ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)
 

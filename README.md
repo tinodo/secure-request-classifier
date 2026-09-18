@@ -215,6 +215,7 @@ sequenceDiagram
 │   ├── Resolve-PowerPlatformEnvironment.ps1 Resolves the environment by display name, per job
 │   ├── Build-Solution.ps1                  Packs the Power Platform solution
 │   ├── Test-SolutionPackage.ps1            Rejects a package Dataverse cannot import
+│   ├── Test-FunctionHostStartup.ps1        Starts the Functions host and checks every function indexes
 │   ├── New-DeploymentSettings.ps1          Renders the deployment settings file
 │   ├── Get-SolutionImportFailure.ps1       Reads the real import error out of Dataverse
 │   ├── Set-FunctionAppDeploymentWindow.ps1 Opens/closes the transient deployment window
