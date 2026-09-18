@@ -609,6 +609,35 @@ if ($ciTriggerBlock) {
 }
 
 # ---------------------------------------------------------------------------------------------
+# Role assignments must be scoped to the resource they are about
+# ---------------------------------------------------------------------------------------------
+
+# A role assignment is an extension resource. Without `scope:` it attaches to whatever the
+# deployment scope happens to be -- here the resource group -- so a grant written to cover one
+# storage account silently covers everything in the group. The template still reads as least
+# privilege, which is what makes it worth asserting rather than trusting.
+
+$roleAssignmentModule = Get-FileText 'infra/modules/role-assignment.bicep'
+
+$roleAssignmentDeclarations = [regex]::Matches(
+    $roleAssignmentModule,
+    "(?s)resource\s+\w+\s+'Microsoft\.Authorization/roleAssignments@[^']+'\s*=[^{]*\{(.*?)\r?\n\}")
+
+Assert-True -Name 'role-assignment.bicep declares at least one role assignment' `
+    -Condition ($roleAssignmentDeclarations.Count -gt 0) `
+    -Detail 'The scope assertion below would otherwise pass by finding nothing.'
+
+foreach ($declaration in $roleAssignmentDeclarations) {
+    Assert-True -Name 'Every role assignment sets an explicit scope' `
+        -Condition ($declaration.Groups[1].Value -match '(?m)^\s*scope:\s*\S') `
+        -Detail 'Without scope: the assignment lands on the resource group, which is wider than intended.'
+}
+
+Assert-True -Name 'main.bicep does not pass the removed scopeResourceId parameter' `
+    -Condition ($mainBicep -notmatch 'scopeResourceId') `
+    -Detail 'That parameter was only ever used inside guid(), so it never scoped anything.'
+
+# ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)
 

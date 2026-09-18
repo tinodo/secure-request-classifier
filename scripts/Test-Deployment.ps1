@@ -30,6 +30,11 @@
 .PARAMETER ResourceGroupName
     Resource group that contains the demo.
 
+.PARAMETER SubscriptionId
+    Subscription that holds the resource group. Optional: without it the Azure CLI's current
+    subscription is used, which is the usual cause of a "resource group could not be found"
+    result on a machine that has access to more than one subscription.
+
 .PARAMETER PowerPlatformEnvironmentUrl
     Optional Dataverse environment URL, for example https://contoso.crm4.dynamics.com.
 
@@ -41,11 +46,16 @@
 
 .EXAMPLE
     ./Test-Deployment.ps1 -ResourceGroupName rg-srclass-demo
+
+.EXAMPLE
+    ./Test-Deployment.ps1 -ResourceGroupName rg-srclass-demo -SubscriptionId 00000000-0000-0000-0000-000000000000
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [string] $ResourceGroupName,
+
+    [string] $SubscriptionId,
 
     [string] $PowerPlatformEnvironmentUrl,
 
@@ -89,7 +99,15 @@ function Add-Result {
 function Invoke-Az {
     param([Parameter(Mandatory)][string[]] $Arguments)
 
-    $raw = & az @Arguments 2>$null
+    # Every call carries the subscription explicitly when one was supplied. `az account set` is
+    # deliberately never used: it mutates the machine's CLI context, which other tools and other
+    # shells share, so a verification run would silently change what an unrelated command targets.
+    $effective = @($Arguments)
+    if ($SubscriptionId -and $Arguments -notcontains '--subscription') {
+        $effective += @('--subscription', $SubscriptionId)
+    }
+
+    $raw = & az @effective 2>$null
     if ($LASTEXITCODE -ne 0) { return $null }
     if ([string]::IsNullOrWhiteSpace(($raw | Out-String).Trim())) { return $null }
     return ($raw | Out-String | ConvertFrom-Json)
@@ -339,22 +357,78 @@ else {
 if ($functionApp -and $functionApp.identity -and $functionApp.identity.principalId) {
     $principalId = $functionApp.identity.principalId
 
-    $assignments = Invoke-Az @('role', 'assignment', 'list', '--assignee', $principalId, '--all', '--output', 'json')
-    $roleNames = @($assignments | ForEach-Object { $_.roleDefinitionName })
+    # `az role assignment list --assignee` resolves the principal through Microsoft Graph first.
+    # A caller who can read ARM but not the directory -- a guest, or anyone without directory read
+    # -- gets an empty list rather than an error, so correct infrastructure is reported as missing
+    # RBAC. Querying ARM directly needs no directory access, so it is the primary source here and
+    # the CLI is only a fallback.
+    $subscriptionId = ($functionApp.id -split '/')[2]
+    $filter = [uri]::EscapeDataString("principalId eq '$principalId'")
+    $assignmentsUrl = "https://management.azure.com/subscriptions/$subscriptionId/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&`$filter=$filter"
 
+    $assignments = @()
+    $rest = Invoke-Az @('rest', '--method', 'get', '--url', $assignmentsUrl, '--output', 'json')
+
+    if ($rest -and $rest.PSObject.Properties['value']) {
+        $assignments = @($rest.value | ForEach-Object {
+            [pscustomobject]@{
+                RoleDefinitionGuid = ($_.properties.roleDefinitionId -split '/')[-1]
+                Scope              = $_.properties.scope
+            }
+        })
+    }
+
+    if ($assignments.Count -eq 0) {
+        $cli = Invoke-Az @('role', 'assignment', 'list', '--assignee', $principalId, '--all', '--output', 'json')
+        $assignments = @($cli | ForEach-Object {
+            [pscustomobject]@{
+                RoleDefinitionGuid = ($_.roleDefinitionId -split '/')[-1]
+                Scope              = $_.scope
+            }
+        })
+    }
+
+    # Each role belongs on one resource, not on the resource group. Checking only that the role
+    # exists somewhere passed for a long time while every assignment actually sat at resource group
+    # scope -- the whole estate rather than the one account or component the identity should reach.
+    $insightsComponents = Invoke-Az @('resource', 'list', '--resource-group', $ResourceGroupName,
+        '--resource-type', 'Microsoft.Insights/components', '--output', 'json')
+    $insightsForRbac = $insightsComponents | Select-Object -First 1
+
+    $storageId = if ($storageAccount) { $storageAccount.id } else { $null }
+    $insightsId = if ($insightsForRbac) { $insightsForRbac.id } else { $null }
+
+    # Built-in role definition GUIDs, matching the roles map in infra/main.bicep.
     $expectedRoles = @(
-        'Storage Blob Data Owner',
-        'Storage Queue Data Contributor',
-        'Storage Table Data Contributor',
-        'Monitoring Metrics Publisher'
+        @{ Name = 'Storage Blob Data Owner';        Guid = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'; Target = $storageId;  Kind = 'the storage account' }
+        @{ Name = 'Storage Queue Data Contributor'; Guid = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'; Target = $storageId;  Kind = 'the storage account' }
+        @{ Name = 'Storage Table Data Contributor'; Guid = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'; Target = $storageId;  Kind = 'the storage account' }
+        @{ Name = 'Monitoring Metrics Publisher';   Guid = '3913510d-42f4-4e42-8a64-420c390055eb'; Target = $insightsId; Kind = 'the Application Insights component' }
     )
 
     foreach ($role in $expectedRoles) {
-        if ($roleNames -contains $role) {
-            Add-Result -Name "Managed identity role assigned: $role" -Status 'Pass'
+        $matching = @($assignments | Where-Object { $_.RoleDefinitionGuid -eq $role.Guid })
+
+        if ($matching.Count -eq 0) {
+            Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Fail' `
+                -Detail "No assignment of $($role.Guid) found for $principalId."
+            continue
+        }
+
+        Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Pass'
+
+        if (-not $role.Target) {
+            Add-Result -Name "$($role.Name) is scoped to $($role.Kind)" -Status 'Warn' `
+                -Detail 'The target resource was not found, so the scope could not be checked.'
+            continue
+        }
+
+        if (@($matching | Where-Object { $_.Scope -eq $role.Target }).Count -gt 0) {
+            Add-Result -Name "$($role.Name) is scoped to $($role.Kind)" -Status 'Pass'
         }
         else {
-            Add-Result -Name "Managed identity role assigned: $role" -Status 'Fail' -Detail "Found: $($roleNames -join ', ')"
+            Add-Result -Name "$($role.Name) is scoped to $($role.Kind)" -Status 'Warn' `
+                -Detail "Scoped to $(($matching | ForEach-Object { $_.Scope }) -join ', ') rather than $($role.Target). Access still works; it is simply wider than intended."
         }
     }
 

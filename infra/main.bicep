@@ -423,7 +423,8 @@ module storageBlobRole 'modules/role-assignment.bicep' = {
   params: {
     principalId: functionApp.outputs.principalId
     roleDefinitionId: roles.storageBlobDataOwner
-    scopeResourceId: storage.outputs.storageAccountId
+    targetKind: 'storageAccount'
+    targetName: storage.outputs.storageAccountName
     assignmentSeed: 'function-host-blob'
   }
 }
@@ -434,7 +435,8 @@ module storageQueueRole 'modules/role-assignment.bicep' = {
   params: {
     principalId: functionApp.outputs.principalId
     roleDefinitionId: roles.storageQueueDataContributor
-    scopeResourceId: storage.outputs.storageAccountId
+    targetKind: 'storageAccount'
+    targetName: storage.outputs.storageAccountName
     assignmentSeed: 'function-host-queue'
   }
 }
@@ -445,7 +447,8 @@ module storageTableRole 'modules/role-assignment.bicep' = {
   params: {
     principalId: functionApp.outputs.principalId
     roleDefinitionId: roles.storageTableDataContributor
-    scopeResourceId: storage.outputs.storageAccountId
+    targetKind: 'storageAccount'
+    targetName: storage.outputs.storageAccountName
     assignmentSeed: 'function-host-table'
   }
 }
@@ -456,7 +459,8 @@ module metricsPublisherRole 'modules/role-assignment.bicep' = {
   params: {
     principalId: functionApp.outputs.principalId
     roleDefinitionId: roles.monitoringMetricsPublisher
-    scopeResourceId: monitoring.outputs.applicationInsightsId
+    targetKind: 'applicationInsights'
+    targetName: monitoring.outputs.applicationInsightsName
     assignmentSeed: 'function-telemetry'
   }
 }
