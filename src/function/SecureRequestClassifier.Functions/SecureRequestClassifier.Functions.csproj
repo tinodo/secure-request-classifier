@@ -23,7 +23,21 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" Version="3.3.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.1.1" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.ApplicationInsights" Version="2.51.0" />
-    <PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="3.1.2" />
+    <!--
+      Pinned to 2.x deliberately. Microsoft.Azure.Functions.Worker.ApplicationInsights builds
+      against Microsoft.ApplicationInsights 2.x, where ITelemetryInitializer lives in
+      Microsoft.ApplicationInsights.Extensibility. Version 3.x moved it, so the isolated worker
+      aborts at startup with
+
+          System.TypeLoadException: Could not load type
+          'Microsoft.ApplicationInsights.Extensibility.ITelemetryInitializer' from assembly
+          'Microsoft.ApplicationInsights, Version=3.1.2.115'
+
+      The host then reports "0 functions found", every route answers 404, and nothing is ever
+      invoked. Nothing in a normal build or unit-test run catches it, because the failure only
+      happens when the Functions host starts the worker.
+    -->
+    <PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="2.23.0" />
   </ItemGroup>
 
   <ItemGroup>

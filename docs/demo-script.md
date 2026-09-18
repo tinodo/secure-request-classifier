@@ -19,7 +19,7 @@ Have a terminal open. Several stages are far more convincing from a command line
 
 **Framing sentence to open with:**
 
-> Everything you are about to see — the network, the application, the Power App, the flow and the pipeline that deployed all of it — is in one Git repository. There is not a single Azure credential stored anywhere in GitHub, and the backend has no address on the internet.
+> Everything you are about to see — the network, the application, the flow and the pipeline that deployed all of it — is in one Git repository. There is not a single Azure credential stored anywhere in GitHub, and the backend has no address on the internet.
 
 ---
 
@@ -110,13 +110,17 @@ Then Power Platform admin center → **Security** → **Data and privacy** → *
 
 ---
 
-## Stage 5 — The Power App
+## Stage 5 — The flow's input form
 
-**Show:** the Secure Request Classifier app in Power Apps.
+**Show:** the **Classify and Notify** flow in Power Automate. Select **Test** → **Manually**.
 
-**Say:** a plain form. Six fields and a button. This is deliberately the least interesting part.
+**Say:** the PowerApps (V2) trigger renders a plain typed form. Six fields and a button. This is deliberately the least interesting part.
 
-**Proves:** the maker experience is unchanged. There is no gateway to install, no special SDK, no custom code in the app. From the maker's point of view they are calling an ordinary flow.
+**Proves:** the maker experience is unchanged. There is no gateway to install, no special SDK, no custom code. From the maker's point of view this is an ordinary flow.
+
+> A canvas app front end is optional and is **not** part of the deployment — `pac canvas pack`
+> cannot build one in CI. The trigger form exercises exactly the same network path, which is what
+> this demonstration is about. See [limitations.md](limitations.md#1-there-is-no-canvas-app-and-one-cannot-be-built-in-ci).
 
 ---
 
@@ -133,9 +137,9 @@ Then Power Platform admin center → **Security** → **Data and privacy** → *
 | Impact | High |
 | Description | Nothing happens when I press the power button. |
 
-Select **Submit**.
+Select **Run flow**.
 
-**Say:** watch for the result card.
+**Say:** watch for the result in the run detail.
 
 **Proves:** nothing yet — but this is the request that the next four stages trace.
 

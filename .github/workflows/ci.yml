@@ -1,24 +1,28 @@
 name: CI
 
-# Runs on every pull request and on pushes that do not deploy.
+# Runs on every pull request into main.
 # Builds and tests everything, and asserts the repository's security invariants.
 # No Azure or Power Platform credentials are used, and none exist.
 
+# Deliberately not triggered on branch pushes. A push to a branch that already has a pull request
+# is the same commit arriving twice, and each trigger publishes its own check run under the same
+# name. Cancelling one of them does not help: branch protection reads the required context, sees a
+# cancelled conclusion, and refuses the merge even though the surviving run passed. Running only on
+# pull_request produces exactly one check run per required context, which is what main's protection
+# rules are actually gating on.
 on:
   pull_request:
     branches: [main]
-  push:
-    branches-ignore: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A branch push and opening a pull request for that branch are two events on the same ref, so
-# both triggers fire and CI runs twice for one commit. Sharing a concurrency group keyed on the
-# ref means the later run cancels the earlier one, leaving a single effective run.
+# Pushing again to an open pull request supersedes the run already in flight, so cancel it rather
+# than paying for a result nobody will read. head_ref is the source branch on a pull_request;
+# ref_name covers a manual dispatch, where head_ref is empty.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -55,6 +59,15 @@ jobs:
           name: test-results
           path: ./TestResults
           if-no-files-found: ignore
+
+      # Building and testing proves the code compiles and behaves. It does not prove the Functions
+      # host can start the isolated worker, which is a separate process that loads the published
+      # assemblies alongside the host's own. When those disagree the worker aborts, the host
+      # indexes nothing, and every route answers 404 while the build and the deployment both stay
+      # green. This step starts the real host and asserts every declared function is registered.
+      - name: The Functions host must index every function
+        shell: pwsh
+        run: ./scripts/Test-FunctionHostStartup.ps1
 
   bicep:
     name: Bicep build and lint
