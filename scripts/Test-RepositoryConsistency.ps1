@@ -587,6 +587,27 @@ Assert-True -Name 'CI starts the Functions host and checks indexing' `
     -Condition ($ciWorkflow -match 'Test-FunctionHostStartup\.ps1') `
     -Detail 'Without it, a worker that cannot start ships as a green build that answers 404.'
 
+# A push to a branch that already has a pull request is the same commit arriving twice, and each
+# trigger publishes its own check run under the same required-context name. Cancelling one does not
+# help: branch protection sees the cancelled conclusion for a required context and blocks the merge
+# even though the surviving run passed. Triggering only on pull_request yields exactly one check
+# run per context, which is what main's protection actually gates on.
+
+$ciTriggerBlock = ''
+if ($ciWorkflow -match '(?ms)^on:\s*\r?\n(.*?)^\S') {
+    $ciTriggerBlock = $Matches[1]
+}
+
+Assert-True -Name 'CI trigger block was located' `
+    -Condition ([bool]$ciTriggerBlock) `
+    -Detail 'Could not find the on: block in .github/workflows/ci.yml.'
+
+if ($ciTriggerBlock) {
+    Assert-True -Name 'CI does not also trigger on push' `
+        -Condition ($ciTriggerBlock -notmatch '(?m)^\s+push:') `
+        -Detail 'A push and its pull request would each publish a check run for the same required context, and a cancelled one blocks the merge.'
+}
+
 # ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)
