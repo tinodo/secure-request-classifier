@@ -642,6 +642,63 @@ Assert-True -Name 'main.bicep does not pass the removed scopeResourceId paramete
     -Detail 'That parameter was only ever used inside guid(), so it never scoped anything.'
 
 # ---------------------------------------------------------------------------------------------
+# Documented script parameters must exist
+# ---------------------------------------------------------------------------------------------
+
+# A renamed or removed parameter leaves the documentation telling the reader to run a command that
+# fails on the spot with "A parameter cannot be found that matches parameter name". Nothing else in
+# the build notices, because no build step runs the commands printed in a document.
+
+$documentationFiles = @(Join-Path $RepositoryRoot 'README.md') +
+    @(Get-ChildItem -Path (Join-Path $RepositoryRoot 'docs') -Filter '*.md' -File | ForEach-Object { $_.FullName })
+
+$parameterCache = @{}
+$badParameters = [System.Collections.Generic.List[string]]::new()
+$invocationsChecked = 0
+
+foreach ($documentationFile in $documentationFiles) {
+    $text = Get-Content -Path $documentationFile -Raw
+    $shortName = Split-Path $documentationFile -Leaf
+
+    # A PowerShell invocation in a fenced block may be split across lines with a backtick, so the
+    # match has to continue through those continuations to see every parameter.
+    foreach ($invocation in [regex]::Matches($text, '(?s)scripts/([A-Za-z-]+\.ps1)((?:[^\r\n]*(?:`\r?\n[^\r\n]*)*))')) {
+        $scriptName = $invocation.Groups[1].Value
+        $scriptPath = Join-Path $RepositoryRoot "scripts/$scriptName"
+
+        if (-not (Test-Path $scriptPath)) {
+            $badParameters.Add("$shortName references scripts/$scriptName, which does not exist")
+            continue
+        }
+
+        if (-not $parameterCache.ContainsKey($scriptName)) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Resolve-Path $scriptPath).Path, [ref]$null, [ref]$null)
+            $parameterCache[$scriptName] = @($ast.ParamBlock.Parameters |
+                ForEach-Object { $_.Name.VariablePath.UserPath })
+        }
+
+        $invocationsChecked++
+
+        foreach ($supplied in [regex]::Matches($invocation.Groups[2].Value, '-([A-Z][A-Za-z]+)')) {
+            $name = $supplied.Groups[1].Value
+            if ($name -in $parameterCache[$scriptName]) { continue }
+            if ($name -in @('Verbose', 'Debug', 'ErrorAction', 'WarningAction', 'WhatIf', 'Confirm')) { continue }
+
+            $badParameters.Add("$shortName passes -$name to $scriptName, which has no such parameter")
+        }
+    }
+}
+
+Assert-True -Name 'Documentation shows at least one script invocation' `
+    -Condition ($invocationsChecked -gt 0) `
+    -Detail 'Nothing was checked, so this assertion could not fail.'
+
+Assert-True -Name 'Every parameter shown in the documentation exists' `
+    -Condition ($badParameters.Count -eq 0) `
+    -Detail ($badParameters -join '; ')
+
+# ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)
 

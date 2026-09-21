@@ -256,16 +256,18 @@ The first call after a fresh network link can still fail while Power Platform se
 Actions → **Deploy** → *Run workflow*.
 
 ```
-validate ──┬─ build-function ─┐
-           └─ infrastructure ─┼─ deploy-function ─┐
-                              ├─ link-enterprise-policy
-                              └─ power-platform ──┴─ verify
+validate ──┬─ build-function ───────────────┐
+           ├─ power-platform-environment ─┬─┤
+           └─ infrastructure ─────────────┴─┼─ deploy-function ──┐
+                                            ├─ link-enterprise-policy
+                                            └─ power-platform ───┴─ verify
 ```
 
 | Job | Does |
 | --- | --- |
 | `validate` | `dotnet build` + `dotnet test`, Bicep compile, Power Platform solution pack |
 | `build-function` | `dotnet publish` and upload as `released-package` |
+| `power-platform-environment` | Creates or adopts the environment, waits for Dataverse, enables Managed Environments, adds the deployment identity as an application user |
 | `infrastructure` | Registers resource providers, runs `az deployment sub create`, exports outputs |
 | `deploy-function` | Deploys the package, then asserts the app ends sealed |
 | `link-enterprise-policy` | Links the environment to the network-injection policy |
@@ -273,6 +275,10 @@ validate ──┬─ build-function ─┐
 | `verify` | Runs the full assertion suite; optionally the connectivity probe |
 
 Each job writes to the run summary, so the whole deployment is auditable from the Actions UI.
+
+The `power-platform` job's summary ends with the manual step that is still outstanding: selecting
+the two connections and turning the flow on. It is printed on every run because it is needed on
+every run — see [What a redeployment resets](#what-a-redeployment-resets).
 
 ### Choosing the function deployment mode
 
