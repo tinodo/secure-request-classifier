@@ -33,6 +33,14 @@
     Leave the container instance and the probe subnet in place afterwards (useful while
     troubleshooting).
 
+.PARAMETER SubscriptionId
+    Subscription holding the resource group. Optional: without it the Azure CLI's current
+    subscription is used, which is the usual cause of a "resource group not found" result on a
+    machine with access to more than one.
+
+.PARAMETER ProbeName
+    Name of the container instance. Change it only if the default collides with something else in
+    the resource group.
 .EXAMPLE
     ./Invoke-PrivateConnectivityProbe.ps1 -ResourceGroupName rg-srclass-demo
 #>
@@ -40,6 +48,8 @@
 param(
     [Parameter(Mandatory)]
     [string] $ResourceGroupName,
+
+    [string] $SubscriptionId,
 
     [string] $ProbeName = 'ci-srclass-probe',
 
@@ -49,11 +59,16 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Carried on every az call below. `az account set` is deliberately never used: it mutates the
+# machine's CLI context, which other tools and other shells share, so running this script would
+# silently change what an unrelated command targets.
+$azContext = if ($SubscriptionId) { @('--subscription', $SubscriptionId) } else { @() }
+
 function Write-Step { param([string] $Message) Write-Host ''; Write-Host "==> $Message" -ForegroundColor Cyan }
 
 Write-Step 'Locating the Function App'
 
-$functionApp = az functionapp list --resource-group $ResourceGroupName --output json | ConvertFrom-Json | Select-Object -First 1
+$functionApp = az functionapp list --resource-group $ResourceGroupName --output json @azContext | ConvertFrom-Json | Select-Object -First 1
 
 if (-not $functionApp) { throw "No function app found in resource group '$ResourceGroupName'." }
 
@@ -92,10 +107,10 @@ catch {
 Write-Step 'Probe 2 of 2: from inside the virtual network (this SHOULD succeed)'
 
 $virtualNetwork = az network vnet list --resource-group $ResourceGroupName `
-    --query "[?contains(name, 'primary')] | [0]" --output json | ConvertFrom-Json
+    --query "[?contains(name, 'primary')] | [0]" --output json @azContext | ConvertFrom-Json
 
 if (-not $virtualNetwork) {
-    $virtualNetwork = az network vnet list --resource-group $ResourceGroupName --output json | ConvertFrom-Json | Select-Object -First 1
+    $virtualNetwork = az network vnet list --resource-group $ResourceGroupName --output json @azContext | ConvertFrom-Json | Select-Object -First 1
 }
 
 if (-not $virtualNetwork) { throw 'No virtual network found in the resource group.' }
@@ -134,7 +149,7 @@ if (-not $existingProbeSubnet) {
         --name $probeSubnetName `
         --address-prefixes $candidate `
         --delegations Microsoft.ContainerInstance/containerGroups `
-        --only-show-errors --output none
+        --only-show-errors --output none @azContext
 }
 
 $probeCommand = @"
@@ -158,7 +173,7 @@ az container create `
     --vnet $virtualNetwork.name `
     --subnet $probeSubnetName `
     --command-line "/bin/sh -c `"tdnf install -y curl >/dev/null 2>&1 || true; $($probeCommand -replace '"', '\"' -replace "`n", '; ')`"" `
-    --only-show-errors --output none
+    --only-show-errors --output none @azContext
 
 Write-Host '    waiting for the probe to finish'
 
@@ -168,12 +183,12 @@ $state = 'Pending'
 while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 10
     $state = az container show --resource-group $ResourceGroupName --name $ProbeName `
-        --query 'instanceView.state' --output tsv 2>$null
+        --query 'instanceView.state' --output tsv @azContext 2>$null
     Write-Host "      state: $state"
     if ($state -in @('Succeeded', 'Failed', 'Terminated')) { break }
 }
 
-$logs = az container logs --resource-group $ResourceGroupName --name $ProbeName 2>&1 | Out-String
+$logs = az container logs --resource-group $ResourceGroupName --name $ProbeName @azContext 2>&1 | Out-String
 
 Write-Host ''
 Write-Host '    --- probe output ---' -ForegroundColor DarkGray
@@ -188,7 +203,7 @@ if ($logs -match '10\.\d+\.\d+\.\d+') { $resolvedPrivateIp = $true }
 if (-not $KeepProbe) {
     Write-Host ''
     Write-Host "    deleting container instance '$ProbeName'"
-    az container delete --resource-group $ResourceGroupName --name $ProbeName --yes --only-show-errors --output none
+    az container delete --resource-group $ResourceGroupName --name $ProbeName --yes --only-show-errors --output none @azContext
 
     # The probe subnet is created by this script, so this script removes it. Leaving it behind
     # accumulates a delegated /28 per run and leaves an address range claimed in the customer's
@@ -201,7 +216,7 @@ if (-not $KeepProbe) {
             --resource-group $ResourceGroupName `
             --vnet-name $virtualNetwork.name `
             --name $probeSubnetName `
-            --only-show-errors --output none
+            --only-show-errors --output none @azContext
 
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "Could not delete the probe subnet '$probeSubnetName'. Remove it by hand, or re-run once the container has fully released it."

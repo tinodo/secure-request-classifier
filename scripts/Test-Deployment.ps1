@@ -230,7 +230,7 @@ else {
         $probe = Invoke-WebRequest -Uri $publicProbeUri -Method Get -TimeoutSec 20 -SkipHttpErrorCheck -ErrorAction Stop
         if ($probe.StatusCode -eq 403) {
             Add-Result -Name 'Public endpoint is blocked from the internet' -Status 'Pass' `
-                -Detail "GET $publicProbeUri returned HTTP 403 (Front Door rejects the request before it reaches the app)."
+                -Detail "GET $publicProbeUri returned HTTP 403 (the App Service front end rejected the request before it reached the app)."
         }
         else {
             Add-Result -Name 'Public endpoint is blocked from the internet' -Status 'Fail' `
@@ -692,6 +692,9 @@ else {
 
     if ($PowerPlatformEnvironmentId) {
         try {
+            # Deliberately no --subscription. This is a token for the Power Platform BAP API, not
+            # an Azure resource call: the token is tenant-scoped, and pinning it to an Azure
+            # subscription made the environment lookup return 404. Verified live, both ways.
             $token = az account get-access-token --resource 'https://service.powerapps.com/' --query accessToken --output tsv
             $uri = "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$PowerPlatformEnvironmentId`?api-version=2016-11-01"
             $environment = Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $token" }

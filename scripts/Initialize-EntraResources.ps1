@@ -48,6 +48,20 @@
     still provisions everything else, and the `link-enterprise-policy` job fails. Use this when a
     directory administrator grants the role separately, then re-run the deployment.
 
+.PARAMETER DefaultBranch
+    Branch the federated credential trusts. Defaults to main. A run on any other branch cannot
+    obtain a token.
+
+.PARAMETER ApiScopeName
+    Name of the delegated scope exposed by the API app registration. Defaults to
+    user_impersonation, which is what the connector requests.
+
+.PARAMETER DeploymentAppDisplayName
+    Display name of the app registration the pipelines sign in as. Change it only to run several
+    independent copies of the demo in one tenant.
+
+.PARAMETER ApiAppDisplayName
+    Display name of the app registration that represents the function API. Same caveat as above.
 .EXAMPLE
     ./Initialize-EntraResources.ps1 -GitHubRepository contoso/secure-request-classifier `
         -SubscriptionId 00000000-0000-0000-0000-000000000000
@@ -321,7 +335,7 @@ function Get-GitHubSubjectPrefix {
     return $default
 }
 
-function Ensure-ApiScope {
+function Set-ApiScope {
     param(
         [Parameter(Mandatory)][object] $Application,
         [Parameter(Mandatory)][string] $ScopeName
@@ -646,7 +660,7 @@ $apiApp = New-OrGetApplication -DisplayName $ApiAppDisplayName
 $apiApp = Invoke-Graph -Method GET -Uri "$script:GraphBase/applications/$($apiApp.id)"
 $apiSp = New-OrGetServicePrincipal -AppId $apiApp.appId
 
-$scopeId = Ensure-ApiScope -Application $apiApp -ScopeName $ApiScopeName
+$scopeId = Set-ApiScope -Application $apiApp -ScopeName $ApiScopeName
 
 # ---------------------------------------------------------------------------------------------
 

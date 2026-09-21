@@ -39,6 +39,7 @@ param(
     [string] $FlowPath
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Validate every OpenApiConnection action's parameter names against the live connector swagger.

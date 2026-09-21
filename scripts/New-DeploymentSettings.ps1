@@ -102,6 +102,7 @@ Write-Host "Wrote deployment settings to $OutputPath" -ForegroundColor Green
 Write-Host ''
 Write-Host 'Resolved tokens:'
 foreach ($key in $resolved.Keys) {
-    $display = $resolved[$key]
-    Write-Host ('  {0,-30} {1}' -f $key, ($display ? $display : '(not supplied)'))
+    # Every token is either resolved or has already thrown above, so there is no unset case left
+    # to render.
+    Write-Host ('  {0,-30} {1}' -f $key, $resolved[$key])
 }

@@ -62,6 +62,12 @@
     Allow the script to configure an environment that already exists. Without this switch an
     existing environment with the same display name is reported and left completely alone.
 
+.PARAMETER Description
+    Description recorded on the environment. Cosmetic; it appears in the admin centre.
+
+.PARAMETER TimeoutSeconds
+    How long to wait for environment provisioning and for the Dataverse database to come online.
+    Dataverse routinely takes several minutes, so lower this only to fail faster on purpose.
 .EXAMPLE
     ./New-PowerPlatformEnvironment.ps1 `
         -DisplayName srclass-demo `
@@ -190,13 +196,16 @@ function Get-EnvironmentByDisplayName {
 
     $environments = ConvertFrom-ResponseContent -Response (Invoke-Bap -Method GET -Uri $uri)
 
-    $matches = @($environments.value | Where-Object { $_.properties.displayName -eq $Name })
+    # Not $matches: that is an automatic variable, populated by the last -match operator, so
+    # assigning to it works only for as long as nothing between the assignment and the read
+    # performs a match. A Where-Object filter one line later would silently replace it.
+    $matched = @($environments.value | Where-Object { $_.properties.displayName -eq $Name })
 
-    if ($matches.Count -gt 1) {
+    if ($matched.Count -gt 1) {
         throw "More than one Power Platform environment is named '$Name'. Resolve the ambiguity before re-running."
     }
 
-    return $matches | Select-Object -First 1
+    return $matched | Select-Object -First 1
 }
 
 function Get-EnvironmentById {
