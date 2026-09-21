@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Fails if the packed Power Platform solution is not a clean SolutionPackager package.

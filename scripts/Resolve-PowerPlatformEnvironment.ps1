@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Resolves a Power Platform environment by display name to its ID and Dataverse URL.

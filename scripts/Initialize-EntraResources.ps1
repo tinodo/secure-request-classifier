@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Creates the Microsoft Entra ID resources the demo needs, using no secrets at any point.
@@ -15,8 +17,11 @@
          for the API on behalf of a signed-in user.
       4. Least-privilege Azure role assignments for the deployment identity.
 
-    Everything it prints is an identifier, not a credential. Store the values as GitHub
-    repository *variables*.
+    Everything it prints is an identifier, not a credential: none of it grants access on its own.
+    Store the values as GitHub repository **secrets** all the same. This repository is public, and
+    GitHub masks secrets in run logs and step summaries but does not mask variables, so an
+    identifier held in a variable is published in the clear on the first successful run. The
+    script prints the exact `gh secret set` commands when it finishes.
 
 .PARAMETER GitHubRepository
     owner/repo, for example contoso/secure-request-classifier.
@@ -25,8 +30,11 @@
     Azure subscription that will host the demo.
 
 .PARAMETER Environments
-    GitHub environment names to federate. A federated credential is also created for the
-    default branch and for pull requests.
+    GitHub environment names to federate. A federated credential is also created for the default
+    branch. No credential is created for pull requests, and an existing one is deleted: this
+    identity holds Contributor and Role Based Access Control Administrator at subscription scope,
+    so a `:pull_request` subject would grant both to any workflow a pull request can trigger and
+    bypass the environment approval gate.
 
 .PARAMETER SkipRoleAssignments
     Create the identities but do not attempt Azure role assignments. Use when a separate

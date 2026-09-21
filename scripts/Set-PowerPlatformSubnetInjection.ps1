@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Links (or unlinks) a Power Platform environment to the network-injection enterprise policy.

@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Deletes a Power Platform environment created by New-PowerPlatformEnvironment.ps1.

@@ -100,12 +100,16 @@ var functionRules = [
   }
 ]
 
-// Private endpoints only ever receive HTTPS, and only from inside the network.
+// The private endpoint subnet sets privateEndpointNetworkPolicies to 'Disabled', which is required
+// for private endpoints to work, and which also means these rules are NOT enforced against private
+// endpoint traffic. The group is attached anyway because an Azure Landing Zone denies the creation
+// of any subnet without one, and it states the intended shape of the traffic so a future change
+// that re-enables the policies inherits a sane rule rather than an empty one.
 var privateEndpointRules = [
   {
     name: 'Allow-Https-From-VirtualNetwork'
     properties: {
-      description: 'Private endpoints accept HTTPS from the delegated and integration subnets.'
+      description: 'Inbound HTTPS from this virtual network. Not enforced while privateEndpointNetworkPolicies is Disabled on the subnet.'
       protocol: 'Tcp'
       sourcePortRange: '*'
       destinationPortRange: '443'

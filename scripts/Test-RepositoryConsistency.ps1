@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
@@ -725,6 +727,112 @@ foreach ($documentation in @('docs/identity-model.md', 'docs/security-model.md',
         -Condition (-not $claimsItExists) `
         -Detail 'The bootstrap never creates one and deletes it if found; documenting it as present advertises the exact escalation this repository removes.'
 }
+
+# The same two claims reached users through the bootstrap script's own comment-based help, which
+# the checks above never looked at. A reader running `Get-Help ./scripts/Initialize-EntraResources.ps1`
+# is exactly the person about to act on it.
+
+$bootstrapHelp = ''
+if ($bootstrapScript -match '(?ms)^<#(.*?)^#>') {
+    $bootstrapHelp = $Matches[1]
+}
+
+Assert-True -Name 'Initialize-EntraResources.ps1 has comment-based help' `
+    -Condition ([bool]$bootstrapHelp) `
+    -Detail 'The assertions below inspect it, and would pass vacuously without it.'
+
+if ($bootstrapHelp) {
+    Assert-True -Name 'Bootstrap help does not claim it federates pull requests' `
+        -Condition ($bootstrapHelp -notmatch '(?i)(also|and) (created |federated )?for pull requests') `
+        -Detail 'It deliberately does the opposite, and deletes the subject if it exists.'
+
+    Assert-True -Name 'Bootstrap help says to store the values as secrets' `
+        -Condition ($bootstrapHelp -match '(?i)\*{0,2}secrets?\*{0,2}' -and
+                    $bootstrapHelp -notmatch '(?i)store the values as github\s+repository \*?variables') `
+        -Detail 'This repository is public: GitHub masks secrets in logs and does not mask variables, so the help must not send identifiers to a variable.'
+}
+
+# ---------------------------------------------------------------------------------------------
+# Every workflow job must be bounded, and OIDC must be granted per job
+# ---------------------------------------------------------------------------------------------
+
+# A job with no timeout inherits GitHub's default of six hours. A hung `az` call or a worker that
+# never starts then burns a runner for the rest of the afternoon before anyone notices.
+#
+# `id-token: write` is the permission that lets a job mint a GitHub OIDC token and exchange it for
+# Azure and Dataverse access. Granting it at workflow level hands it to every job, including the
+# ones that only compile and test. Granting it per job means a compromised build step cannot
+# authenticate to anything at all.
+
+foreach ($workflowName in @('ci.yml', 'deploy.yml', 'destroy.yml')) {
+    $workflowText = Get-FileText ".github/workflows/$workflowName"
+
+    # Only look below `jobs:`. Trigger keys such as `push:` sit at the same two-space indent under
+    # `on:`, so matching job headers across the whole file counts them as jobs.
+    $jobsSection = ''
+    if ($workflowText -match '(?ms)^jobs:\s*\r?\n(.*)$') {
+        $jobsSection = $Matches[1]
+    }
+
+    $jobNames = @([regex]::Matches($jobsSection, '(?m)^  ([a-z][a-z0-9-]*):\s*$') |
+        ForEach-Object { $_.Groups[1].Value })
+
+    $timeouts = [regex]::Matches($jobsSection, '(?m)^    timeout-minutes:').Count
+
+    Assert-True -Name "$workflowName declares at least one job" `
+        -Condition ($jobNames.Count -gt 0) `
+        -Detail 'Job detection failed, so the timeout assertion below could not fail.'
+
+    Assert-True -Name "Every job in $workflowName sets a timeout" `
+        -Condition ($timeouts -ge $jobNames.Count) `
+        -Detail "$timeouts timeout-minutes for $($jobNames.Count) job(s): $($jobNames -join ', '). Without one a hung job runs for six hours."
+}
+
+$deployWorkflow = Get-FileText '.github/workflows/deploy.yml'
+
+# Match the workflow-level block only: it sits at column zero, unlike the per-job ones.
+if ($deployWorkflow -match '(?m)^permissions:\r?\n((?:^  .*\r?\n)+)') {
+    Assert-True -Name 'deploy.yml does not grant id-token at workflow level' `
+        -Condition ($Matches[1] -notmatch 'id-token') `
+        -Detail 'That grants OIDC to every job, including validate and build-function, which never authenticate.'
+}
+else {
+    Assert-True -Name 'deploy.yml does not grant id-token at workflow level' `
+        -Condition $false `
+        -Detail 'No workflow-level permissions block was found at all; deploy.yml should declare contents: read.'
+}
+
+# A -Force switch that short-circuits ShouldProcess turns `-Force -WhatIf` -- the natural way to
+# ask for a forced dry run -- into a real deletion. Lowering $ConfirmPreference instead keeps
+# ShouldProcess on every path. Verified: the short-circuit form deletes under -WhatIf, this one
+# previews.
+
+foreach ($destructiveScript in @('scripts/Remove-Demo.ps1', 'scripts/Remove-PowerPlatformEnvironment.ps1')) {
+    # Strip comments first. The explanation of why this pattern is wrong necessarily contains the
+    # pattern, and matching prose would fail the check on the file that documents the fix.
+    $codeOnly = (Get-FileText $destructiveScript) -split "`n" |
+        Where-Object { $_ -notmatch '^\s*#' } |
+        Join-String -Separator "`n"
+
+    Assert-True -Name "$destructiveScript does not let -Force bypass -WhatIf" `
+        -Condition ($codeOnly -notmatch '\$Force\s+-or\s+\$PSCmdlet\.ShouldProcess') `
+        -Detail 'Use $ConfirmPreference = ''None'' when -Force is supplied, and always call ShouldProcess.'
+}
+
+# Every script here is written for PowerShell 7 -- ternaries, null-coalescing, -SkipHttpErrorCheck.
+# On Windows the default `powershell.exe` is still 5.1, where those are parse errors, so a reader
+# who runs one there gets a syntax complaint about the script rather than a statement of the
+# prerequisite. #Requires turns that into one clear line.
+
+$scriptsMissingVersionRequirement = @(
+    Get-ChildItem -Path (Join-Path $RepositoryRoot 'scripts') -Filter '*.ps1' -File |
+        Where-Object { (Get-Content -Path $_.FullName -Raw) -notmatch '#Requires -Version 7' } |
+        ForEach-Object { $_.Name }
+)
+
+Assert-True -Name 'Every script declares the PowerShell version it needs' `
+    -Condition ($scriptsMissingVersionRequirement.Count -eq 0) `
+    -Detail "Missing #Requires -Version 7.0: $($scriptsMissingVersionRequirement -join ', ')"
 
 # ---------------------------------------------------------------------------------------------
 

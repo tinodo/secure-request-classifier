@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Removes everything the Secure Request Classifier deployment created.
@@ -87,6 +89,19 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# -Force means "do not ask me", not "ignore -WhatIf". Writing the gates as
+# `$Force -or $PSCmdlet.ShouldProcess(...)` short-circuits, so ShouldProcess is never reached and
+# -WhatIf never takes effect: `-Force -WhatIf`, the natural way to ask for a forced dry run, would
+# delete the resource group and everything in it for real.
+#
+# Lowering $ConfirmPreference instead keeps ShouldProcess on every path, so -WhatIf always previews
+# and -Confirm can still be requested explicitly. It also makes -Force apply uniformly, rather than
+# only to the resource group delete while the solution, the policy unlink and the app registrations
+# kept prompting.
+if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) {
+    $ConfirmPreference = 'None'
+}
 
 function Write-Step { param([string] $Message) Write-Host ''; Write-Host "==> $Message" -ForegroundColor Cyan }
 
@@ -225,7 +240,7 @@ if ($PowerPlatformEnvironmentId -and -not $KeepPowerPlatformEnvironment) {
 if ($resourceGroup) {
     Write-Step "Deleting resource group '$ResourceGroupName'"
 
-    if ($Force -or $PSCmdlet.ShouldProcess($ResourceGroupName, 'Delete resource group and all resources in it')) {
+    if ($PSCmdlet.ShouldProcess($ResourceGroupName, 'Delete resource group and all resources in it')) {
         # Deliberately NOT --no-wait. This script reporting success has to mean the resource
         # group is actually gone, otherwise a redeploy races a half-deleted one.
         az group delete --name $ResourceGroupName --yes --only-show-errors
