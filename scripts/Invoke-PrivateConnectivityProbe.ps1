@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Proves that the Azure Function is reachable over private networking and unreachable from

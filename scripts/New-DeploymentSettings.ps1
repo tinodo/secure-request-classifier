@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Renders the Power Platform deployment settings file from its committed template.

@@ -33,10 +33,11 @@ jobs:
   dotnet:
     name: .NET build and test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -72,8 +73,9 @@ jobs:
   bicep:
     name: Bicep build and lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install Bicep
         run: az bicep install && az bicep version
@@ -102,8 +104,9 @@ jobs:
   powerplatform:
     name: Power Platform solution
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: microsoft/powerplatform-actions/actions-install@v1
 
@@ -159,8 +162,9 @@ jobs:
   scripts:
     name: PowerShell analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install PSScriptAnalyzer
         shell: pwsh
@@ -200,8 +204,9 @@ jobs:
   consistency:
     name: Cross-artefact consistency
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Bicep outputs, workflow references, Power Platform environment variables and connection
       # references, Function App settings and HTTP routes must all agree. A rename in one place
@@ -220,8 +225,9 @@ jobs:
   security-invariants:
     name: Security invariants
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: No workflow may reference a stored credential
         shell: bash

@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Opens or closes a tightly scoped, temporary deployment window on the Function App.

@@ -219,9 +219,9 @@ var regionPairs = {
 }
 
 // The enterprise policy `location` uses Power Platform geography names, which differ from the
-// Power Platform environment `location` for a handful of geographies.
+// Power Platform environment `location` for a handful of geographies. Only the differences belong
+// here: anything absent falls through to the region name unchanged.
 var enterprisePolicyLocationAliases = {
-  uk: 'uk'
   unitedarabemirates: 'uae'
   southamerica: 'brazil'
 }
@@ -239,10 +239,18 @@ var enterprisePolicyLocation = enterprisePolicyLocationAliases[?powerPlatformReg
 var uniqueSuffix = substring(uniqueString(subscription().subscriptionId, resourceGroupName), 0, 6)
 var baseName = '${workloadName}-${environmentName}'
 
+// A storage account name is capped at 24 characters and may not contain a hyphen. The parts here
+// can legitimately exceed that: 'st' plus workloadName (up to 12) plus environmentName (up to 8)
+// plus the 6-character uniqueness suffix is 28. Truncating the readable part rather than the whole
+// name keeps the suffix intact, which is what makes the name globally unique; trimming the end
+// instead would let two different workloads collide.
+var storageNameReadablePart = toLower('st${replace(workloadName, '-', '')}${environmentName}')
+var storageNameMaximumReadableLength = 24 - length(uniqueSuffix)
+
 var names = {
   primaryVnet: 'vnet-${baseName}-primary'
   failoverVnet: 'vnet-${baseName}-failover'
-  storageAccount: toLower('st${replace(workloadName, '-', '')}${environmentName}${uniqueSuffix}')
+  storageAccount: '${substring(storageNameReadablePart, 0, min(length(storageNameReadablePart), storageNameMaximumReadableLength))}${uniqueSuffix}'
   logAnalytics: 'log-${baseName}'
   applicationInsights: 'appi-${baseName}'
   hostingPlan: 'plan-${baseName}'
@@ -562,9 +570,6 @@ output functionHealthUrl string = '${functionApp.outputs.functionAppBaseUrl}/api
 
 @description('Principal ID of the Function App managed identity.')
 output functionAppPrincipalId string = functionApp.outputs.principalId
-
-@description('Whether App Service Authentication was configured.')
-output functionAppAuthenticationConfigured bool = functionApp.outputs.authenticationConfigured
 
 @description('Name of the storage account.')
 output storageAccountName string = storage.outputs.storageAccountName

@@ -432,8 +432,9 @@ The presenter's script, with talking points for each stage, is in **[docs/demo-s
 # 40+ assertions: public access disabled, private endpoint approved, DNS records present,
 # RBAC correct and correctly scoped, delegations correct, no shared keys, and more.
 pwsh ./scripts/Test-Deployment.ps1 `
-    -ResourceGroupName rg-srclass-demo `
-    -SubscriptionId    <subscription-guid>
+    -ResourceGroupName            rg-srclass-demo `
+    -SubscriptionId               <subscription-guid> `
+    -PowerPlatformEnvironmentId   <environment-guid>
 
 # Two live probes: from the public internet (must fail) and from inside the VNet (must succeed).
 pwsh ./scripts/Invoke-PrivateConnectivityProbe.ps1 -ResourceGroupName rg-srclass-demo
@@ -441,6 +442,8 @@ pwsh ./scripts/Invoke-PrivateConnectivityProbe.ps1 -ResourceGroupName rg-srclass
 
 `-SubscriptionId` is optional but worth passing: without it the Azure CLI's current subscription is
 used, which is the usual reason for an otherwise inexplicable "resource group could not be found".
+`-PowerPlatformEnvironmentId` adds the check that the environment is actually linked to the
+enterprise policy, which is the one thing that makes the private path work at all.
 
 Reading role assignments needs `Microsoft.Authorization/roleAssignments/read`. Without it those
 checks report a warning that says so, rather than claiming the grants are missing.

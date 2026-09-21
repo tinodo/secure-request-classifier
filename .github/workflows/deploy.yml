@@ -45,8 +45,10 @@ on:
       - 'scripts/**'
       - '.github/workflows/deploy.yml'
 
+# Least privilege by default. `id-token: write` is what lets a job mint a GitHub OIDC token and
+# exchange it for Azure and Dataverse credentials, so it is granted per job rather than here:
+# `validate` and `build-function` only compile and test, never authenticate, and do not get it.
 permissions:
-  id-token: write
   contents: read
 
 concurrency:
@@ -72,13 +74,14 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       solution-built: ${{ steps.solution.outcome == 'success' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -123,11 +126,12 @@ jobs:
     needs: validate
     if: ${{ (github.event_name != 'workflow_dispatch' || inputs.deploy-function) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -149,13 +153,17 @@ jobs:
     needs: validate
     if: ${{ (github.event_name != 'workflow_dispatch' || inputs.provision-power-platform-environment) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      id-token: write
+      contents: read
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     # No environment-id / environment-url outputs. Both are masked, and GitHub redacts a job
     # output whose value contains a registered secret, so they would arrive empty. Each
     # consuming job resolves the environment for itself from the display name instead, with
     # scripts/Resolve-PowerPlatformEnvironment.ps1.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
@@ -222,6 +230,10 @@ jobs:
     needs: validate
     if: ${{ (github.event_name != 'workflow_dispatch' || inputs.deploy-infrastructure) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     outputs:
       resource-group: ${{ steps.deploy.outputs.resourceGroupName }}
@@ -233,7 +245,7 @@ jobs:
       enterprise-policy-name: ${{ steps.deploy.outputs.enterprisePolicyName }}
       primary-location: ${{ steps.deploy.outputs.primaryLocation }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
@@ -365,13 +377,17 @@ jobs:
     # Set FUNCTION_DEPLOY_RUNNER_LABEL to a self-hosted runner (or a GitHub-hosted larger
     # runner with Azure private networking) to deploy without ever opening public access.
     runs-on: ${{ vars.FUNCTION_DEPLOY_RUNNER_LABEL || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      id-token: write
+      contents: read
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     env:
       RESOURCE_GROUP: ${{ needs.infrastructure.outputs.resource-group }}
       FUNCTION_APP: ${{ needs.infrastructure.outputs.function-app-name }}
       DEPLOY_MODE: ${{ vars.FUNCTION_DEPLOY_MODE || 'deployment-window' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
@@ -462,9 +478,13 @@ jobs:
     needs: [infrastructure, power-platform-environment]
     if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.link-enterprise-policy) && needs.infrastructure.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3
@@ -520,9 +540,13 @@ jobs:
     needs: [infrastructure, deploy-function, power-platform-environment]
     if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.deploy-power-platform) && needs.infrastructure.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      id-token: write
+      contents: read
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: microsoft/powerplatform-actions/actions-install@v1
 
@@ -635,9 +659,13 @@ jobs:
     needs: [infrastructure, deploy-function, power-platform, link-enterprise-policy, power-platform-environment]
     if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.run-verification) && needs.infrastructure.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
     environment: ${{ vars.DEPLOY_ENVIRONMENT || 'demo' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Sign in to Azure with OIDC
         uses: azure/login@v3

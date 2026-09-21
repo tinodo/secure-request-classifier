@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Checks every flow action's parameter names against the connector's own operation schema.

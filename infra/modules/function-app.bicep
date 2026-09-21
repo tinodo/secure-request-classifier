@@ -82,10 +82,6 @@ param businessDayEndUtcHour int = 17
 @description('Resource tags.')
 param tags object = {}
 
-// Authentication is unconditional now, so this is always true. Kept as an output because
-// Test-Deployment.ps1 and the workflow summary both report on it.
-var configureAuthentication = true
-
 resource storageAccount 'Microsoft.Storage/storageAccounts@2024-01-01' existing = {
   name: storageAccountName
 }
@@ -264,6 +260,3 @@ output principalId string = functionApp.identity.principalId
 
 @description('Resource ID of the Flex Consumption plan.')
 output hostingPlanId string = hostingPlan.id
-
-@description('Whether App Service Authentication was configured in this deployment.')
-output authenticationConfigured bool = configureAuthentication

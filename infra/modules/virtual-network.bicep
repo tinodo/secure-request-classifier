@@ -97,9 +97,15 @@ var powerPlatformSubnet = {
         }
       }
     ]
-    // Power Platform containers must be able to reach the private endpoints in the peered
-    // network. The network security group documents that flow explicitly and leaves Azure's
-    // default outbound rules in place beneath it.
+    // These two flags decide whether NSG and route-table rules apply to private endpoints and
+    // private link services created *inside this subnet*. This subnet is delegated to Power
+    // Platform and hosts neither, so leaving them at the default 'Enabled' changes nothing here;
+    // they are stated rather than omitted so the contrast with the private endpoint subnet, which
+    // must disable them, is visible in one place.
+    //
+    // What actually lets the connector containers reach the private endpoints is the peering, the
+    // network security group rule allowing outbound 443 to the VirtualNetwork service tag, and the
+    // private DNS zones being linked to both networks.
     privateEndpointNetworkPolicies: 'Enabled'
     privateLinkServiceNetworkPolicies: 'Enabled'
   }

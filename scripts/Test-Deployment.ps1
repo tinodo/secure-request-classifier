@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Verifies that the Secure Request Classifier demo deployed correctly and is actually secure.
@@ -94,6 +96,21 @@ function Add-Result {
 
     Write-Host ('{0} {1}' -f $symbol, $Name) -ForegroundColor $colour
     if ($Detail) { Write-Host ('       {0}' -f $Detail) -ForegroundColor DarkGray }
+}
+
+function Get-PropertyOrNull {
+    <#
+        Set-StrictMode turns reading an absent property into a terminating error, and Azure and
+        Power Platform APIs routinely omit properties rather than returning them null. Walking a
+        response with plain dot notation therefore throws on exactly the "the thing is not
+        configured" case a verification script most needs to report clearly.
+    #>
+    param($InputObject, [Parameter(Mandatory)][string] $Name)
+
+    if ($null -eq $InputObject) { return $null }
+    if (-not $InputObject.PSObject.Properties[$Name]) { return $null }
+
+    return $InputObject.PSObject.Properties[$Name].Value
 }
 
 function Invoke-Az {
@@ -650,7 +667,11 @@ if (-not $policy) {
 }
 else {
     $policyDetail = Invoke-Az @('resource', 'show', '--ids', $policy.id, '--api-version', '2020-10-30-preview', '--output', 'json')
-    $injectedNetworks = @($policyDetail.properties.networkInjection.virtualNetworks)
+    # A policy of the wrong kind has no networkInjection property at all, and under StrictMode
+    # reading through it throws and takes the whole run down instead of failing this one check.
+    $injectedNetworks = @(Get-PropertyOrNull -InputObject (
+        Get-PropertyOrNull -InputObject $policyDetail.properties -Name 'networkInjection'
+    ) -Name 'virtualNetworks')
 
     if ($policyDetail.kind -eq 'NetworkInjection' -and $injectedNetworks.Count -ge 1) {
         Add-Result -Name 'Power Platform enterprise policy exists' -Status 'Pass' `
@@ -674,7 +695,17 @@ else {
             $token = az account get-access-token --resource 'https://service.powerapps.com/' --query accessToken --output tsv
             $uri = "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$PowerPlatformEnvironmentId`?api-version=2016-11-01"
             $environment = Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $token" }
-            $linkedPolicy = $environment.properties.enterprisePolicies.VNets.id
+
+            # An environment that is NOT linked simply has no enterprisePolicies property, and
+            # under Set-StrictMode walking into it throws. The catch below then reported that as a
+            # confusing warning about a missing property, hiding the specific, actionable failure
+            # this check exists to produce. Navigate defensively so "not linked" reaches the Fail
+            # branch and the catch is left for genuine query problems.
+            $linkedPolicy = Get-PropertyOrNull -InputObject (
+                Get-PropertyOrNull -InputObject (
+                    Get-PropertyOrNull -InputObject $environment.properties -Name 'enterprisePolicies'
+                ) -Name 'VNets'
+            ) -Name 'id'
 
             if ($linkedPolicy) {
                 Add-Result -Name 'Power Platform environment is linked to the enterprise policy' -Status 'Pass' -Detail $linkedPolicy

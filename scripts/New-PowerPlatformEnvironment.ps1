@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Creates (idempotently) a dedicated Power Platform environment for this demo, enables
