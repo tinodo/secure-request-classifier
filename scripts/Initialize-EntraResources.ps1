@@ -497,10 +497,11 @@ $originalTenantId = $account.tenantId
 #
 # The tenant that matters is the one the CLI will authenticate against, which is the tenantId on
 # the subscription as `az account list` records it. That is NOT always what ARM reports for the
-# same subscription: subscription 6d47a6cb is recorded by ARM under 971d7970, while the CLI
-# operates in 72f988bf, the credential's home tenant. Graph follows the CLI. Reading ARM instead
-# sent this script into the wrong directory, where it tried to create the deployment app and was
-# stopped only by an unrelated policy there - not by anything here.
+# same subscription. A subscription reachable through a guest account can be recorded by ARM under
+# the resource tenant while the CLI keeps operating in the credential's own home tenant, and Graph
+# follows the CLI rather than ARM. Trusting the ARM value sent an earlier version of this script
+# into the wrong directory, where it began creating the deployment app registration and was stopped
+# only by an unrelated policy there - not by anything in this script.
 $targetTenantId = az account list `
     --query "[?id=='$SubscriptionId'].tenantId | [0]" --output tsv 2>$null
 

@@ -253,7 +253,14 @@ public sealed class RequestClassifier(IOptions<ClassifierOptions> options)
 
         var suffix = Convert.ToHexString(hash.AsSpan(0, 4));
 
-        return $"SRC-{receivedAtUtc.ToUniversalTime():yyyyMMdd}-{suffix}";
+        // Invariant culture, like the seed above. An interpolated {:yyyyMMdd} formats with the
+        // current culture, so under a non-Gregorian default calendar such as th-TH the same
+        // instant renders a different year, and under a culture with non-ASCII digits it renders
+        // different characters. The request id would then depend on the host's locale, which is
+        // exactly what the determinism this method promises is supposed to rule out.
+        var datePart = receivedAtUtc.ToUniversalTime().ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+
+        return $"SRC-{datePart}-{suffix}";
     }
 
     private static string CollapseWhitespace(string value) =>

@@ -47,22 +47,28 @@ flowchart TB
 ## 1. The GitHub Actions deployment identity
 
 **Type:** Microsoft Entra ID app registration
-**Credential:** none. Three federated identity credentials, no client secret, no certificate.
+**Credential:** none. Two federated identity credentials, no client secret, no certificate.
 
 ### Federated credentials
 
 | Name | Subject | Grants tokens to |
 | --- | --- | --- |
 | `github-branch-main` | `repo:<owner>/<repo>:ref:refs/heads/main` | runs on `main` |
-| `github-pull-request` | `repo:<owner>/<repo>:pull_request` | pull-request validation |
 | `github-environment-demo` | `repo:<owner>/<repo>:environment:demo` | jobs bound to the `demo` GitHub environment |
 
 Issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`.
 
+There is deliberately **no `:pull_request` credential**, and `scripts/Initialize-EntraResources.ps1`
+deletes one if it finds it. This identity holds Contributor and Role Based Access Control
+Administrator on the subscription, so a `pull_request` subject would hand that to any workflow a
+pull request can trigger, bypassing the `demo` environment's approval gate. Nothing needs it: CI is
+the only pull-request-triggered workflow and it uses no Azure credentials at all. A CI invariant
+fails the build if the subject reappears — see [security-model.md](security-model.md).
+
 ### How the exchange works
 
 1. The job declares `permissions: id-token: write`.
-2. GitHub mints a short-lived JWT whose `sub` claim is one of the three subjects above.
+2. GitHub mints a short-lived JWT whose `sub` claim is one of the two subjects above.
 3. `azure/login@v3` presents that JWT to Microsoft Entra ID.
 4. Entra ID matches issuer + subject + audience against a federated credential and issues an access token.
 
@@ -81,7 +87,6 @@ Nothing long-lived exists to be stolen, and the trust is pinned to this reposito
 
 * Put **required reviewers** on the `demo` GitHub environment, so a human approves before a token is minted at all.
 * Add an ABAC condition to the RBAC Administrator assignment restricting which role definitions it may assign — the exact command is in [security-model.md](security-model.md#the-deployment-identity-avoids-owner).
-* Remove the `pull_request` credential if pull requests never need Azure access.
 * Scope `Contributor` to a pre-created resource group instead of the subscription, if you create the group separately.
 
 ---

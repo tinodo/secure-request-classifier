@@ -100,6 +100,62 @@ public sealed class ClassifyRequestFunctionTests
     }
 
     [Fact]
+    public async Task A_correlation_id_in_the_body_is_echoed_back()
+    {
+        // The request contract advertises correlationId as a body field, which is the obvious
+        // place for a Power Automate flow to put it. It used to be deserialized and then silently
+        // dropped, so the caller got a random GUID back and could not tie the two together.
+        var body = ValidBody.Replace(
+            "\"description\"",
+            "\"correlationId\": \"from-the-body\", \"description\"",
+            StringComparison.Ordinal);
+
+        var result = await CreateFunction().RunAsync(CreateRequest(body), CancellationToken.None);
+
+        var response = Assert.IsType<ClassificationResponse>(Assert.IsType<OkObjectResult>(result).Value);
+
+        Assert.Equal("from-the-body", response.CorrelationId);
+    }
+
+    [Fact]
+    public async Task The_header_correlation_id_wins_over_the_body()
+    {
+        var body = ValidBody.Replace(
+            "\"description\"",
+            "\"correlationId\": \"from-the-body\", \"description\"",
+            StringComparison.Ordinal);
+
+        var result = await CreateFunction()
+            .RunAsync(CreateRequest(body, ("x-correlation-id", "from-the-header")), CancellationToken.None);
+
+        var response = Assert.IsType<ClassificationResponse>(Assert.IsType<OkObjectResult>(result).Value);
+
+        Assert.Equal("from-the-header", response.CorrelationId);
+    }
+
+    [Fact]
+    public async Task An_over_long_correlation_id_is_truncated()
+    {
+        var result = await CreateFunction()
+            .RunAsync(CreateRequest(ValidBody, ("x-correlation-id", new string('x', 500))), CancellationToken.None);
+
+        var response = Assert.IsType<ClassificationResponse>(Assert.IsType<OkObjectResult>(result).Value);
+
+        Assert.Equal(128, response.CorrelationId.Length);
+    }
+
+    [Fact]
+    public async Task A_whitespace_only_correlation_id_is_treated_as_absent()
+    {
+        var result = await CreateFunction()
+            .RunAsync(CreateRequest(ValidBody, ("x-correlation-id", "   ")), CancellationToken.None);
+
+        var response = Assert.IsType<ClassificationResponse>(Assert.IsType<OkObjectResult>(result).Value);
+
+        Assert.True(Guid.TryParse(response.CorrelationId, out _));
+    }
+
+    [Fact]
     public async Task An_invalid_request_returns_400_problem_json_with_a_field_map()
     {
         const string body = """{ "requesterName": "", "impact": "Catastrophic" }""";

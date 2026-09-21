@@ -1,3 +1,4 @@
+using System.Globalization;
 using SecureRequestClassifier.Functions.Models;
 using SecureRequestClassifier.Functions.Services;
 using Xunit;
@@ -92,5 +93,38 @@ public sealed class RequestClassifierPriorityTests
         Assert.Throws<ArgumentOutOfRangeException>(
             () => classifier.Classify(
                 Request("IT", "Catastrophic"), TestFactory.WednesdayMorning, "corr-1"));
+    }
+
+    [Fact]
+    public void The_request_id_does_not_depend_on_the_host_culture()
+    {
+        // th-TH defaults to the Buddhist calendar, so a year formatted with the current culture
+        // comes out 543 years ahead and the id silently changes shape depending on where the
+        // worker happens to run. ar-SA additionally renders digits outside ASCII.
+        var classifier = TestFactory.CreateClassifier();
+
+        var invariant = classifier
+            .Classify(Request("IT", "High"), TestFactory.WednesdayMorning, "corr-1")
+            .RequestId;
+
+        var original = CultureInfo.CurrentCulture;
+
+        foreach (var cultureName in new[] { "th-TH", "ar-SA", "fa-IR" })
+        {
+            try
+            {
+                CultureInfo.CurrentCulture = new CultureInfo(cultureName);
+
+                var underCulture = classifier
+                    .Classify(Request("IT", "High"), TestFactory.WednesdayMorning, "corr-1")
+                    .RequestId;
+
+                Assert.Equal(invariant, underCulture);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = original;
+            }
+        }
     }
 }
