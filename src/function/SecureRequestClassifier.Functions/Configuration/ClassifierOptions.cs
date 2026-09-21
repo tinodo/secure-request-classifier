@@ -15,6 +15,7 @@ public sealed class ClassifierOptions
     /// <summary>Exclusive hour (UTC) at which the business day ends.</summary>
     public int BusinessDayEndUtcHour { get; set; } = 17;
 
+    /// <summary>Name reported by the health endpoint and shown in the confirmation email footer.</summary>
     public string ServiceName { get; set; } = "Secure Request Classifier";
 
     /// <summary>

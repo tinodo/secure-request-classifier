@@ -69,12 +69,15 @@ This is the most convincing single artefact in the whole demo: the same URL, two
 
 `.github/workflows/ci.yml` → `security-invariants` fails the build on:
 
-* any `${{ secrets.* }}` reference other than `GITHUB_TOKEN`;
+* any `${{ secrets.* }}` reference that is not an allow-listed non-credential identifier, and on any secret *named* like credential material;
 * `allowSharedKeyAccess: true` anywhere in `infra/`;
 * a `clientSecretSettingName:` assignment;
 * `demo.bicepparam` no longer shipping `publicNetworkAccess = 'Disabled'`;
 * `storage.bicep` no longer setting `allowSharedKeyAccess: false`;
+* `apiApplicationId` gaining a default, which would deploy the API unauthenticated when the secret is unset;
+* a `:pull_request` federated identity credential, which would bypass the environment approval gate;
 * a credential-shaped literal in any source file;
+* a tenant, subscription or environment identifier committed outside the public allow-list;
 * an `AuthorizationLevel` other than `Anonymous`.
 
 ### Unit tests
@@ -83,7 +86,8 @@ This is the most convincing single artefact in the whole demo: the same URL, two
 dotnet test
 ```
 
-98 tests across seven fixtures:
+98 tests across seven files. Eight fixtures — `HealthFunctionTests.cs` holds two, because the
+second is about the whole assembly rather than about health:
 
 | Fixture | Covers |
 | --- | --- |
@@ -94,11 +98,13 @@ dotnet test
 | `CallerIdentityReaderTests` | Easy Auth principal parsing, v1 and v2 claim shapes, malformed headers degrading to anonymous |
 | `ClassifyRequestFunctionTests` | HTTP status codes, `application/problem+json` shape, correlation handling, the caller allow-list |
 | `HealthFunctionTests` | Authenticated and unauthenticated probes, reported runtime and version |
+| `AuthorizationLevelTests` | **Every HTTP trigger uses `AuthorizationLevel.Anonymous`**, the expected function names are registered, and the routes match the documented contract |
 
-The "no Function keys" claim is not left to a unit test. The `security-invariants` job in CI greps
-the source for `AuthorizationLevel.Function`, `.Admin` and `.System` and fails the build if any
-appears, so the guarantee is checked against the whole tree rather than against whichever triggers
-somebody remembered to write a test for.
+The last fixture is worth noting. It reflects over the assembly rather than testing one class, so the
+"no Function keys" claim is verified on every build instead of asserted in prose. The
+`security-invariants` CI job greps the tree for `AuthorizationLevel.Function`, `.Admin` and
+`.System` as well — belt and braces, because the test proves it for triggers that exist and the
+grep catches one added in a file nobody thought to test.
 
 ### The Functions host must actually start
 

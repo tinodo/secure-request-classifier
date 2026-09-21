@@ -28,7 +28,11 @@ public sealed record ClassificationRequest
     [JsonPropertyName("description")]
     public string? Description { get; init; }
 
-    /// <summary>Optional caller-supplied correlation id; echoed back for end-to-end tracing.</summary>
+    /// <summary>
+    /// Optional caller-supplied correlation id, echoed back for end-to-end tracing. The
+    /// <c>x-correlation-id</c> header takes precedence when both are supplied; when neither is,
+    /// one is generated. Trimmed and capped at 128 characters.
+    /// </summary>
     [JsonPropertyName("correlationId")]
     public string? CorrelationId { get; init; }
 }

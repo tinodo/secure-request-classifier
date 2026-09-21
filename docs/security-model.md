@@ -113,7 +113,7 @@ This is the part worth dwelling on with a customer. Each row is a credential tha
 | Credential | How it is eliminated | Where |
 | --- | --- | --- |
 | Azure deployment credential | GitHub OIDC federated identity credential; the app registration has no secret and no certificate | `scripts/Initialize-EntraResources.ps1` |
-| Power Platform deployment credential | `pac auth create --githubFederated` — federation is selected by supplying `app-id` + `tenant-id` and omitting `client-secret` | `.github/workflows/deploy.yml` |
+| Power Platform deployment credential | `microsoft/powerplatform-actions/import-solution` authenticates by federation: `app-id` and `tenant-id` are supplied and `client-secret` is deliberately omitted | `.github/workflows/deploy.yml` |
 | Function key | Every trigger is `AuthorizationLevel.Anonymous`; Entra ID does the gating | `src/function/**/Endpoints/*.cs` |
 | Storage account key | `allowSharedKeyAccess: false` | `infra/modules/storage.bicep` |
 | SAS token | Impossible — the signing key is disabled | same |
@@ -169,13 +169,19 @@ az role assignment create \
 
 ### Federated credentials are narrowly scoped
 
-Three credentials, each pinned to an exact subject:
+Two credentials, each pinned to an exact subject:
 
 | Subject | Grants tokens to |
 | --- | --- |
 | `repo:<owner>/<repo>:ref:refs/heads/main` | the main branch only |
-| `repo:<owner>/<repo>:pull_request` | pull-request validation only |
 | `repo:<owner>/<repo>:environment:demo` | the `demo` GitHub environment only |
+
+There is deliberately no `:pull_request` subject. This identity holds Contributor and Role Based
+Access Control Administrator at subscription scope, so a `pull_request` credential would grant that
+to any workflow a pull request can trigger, side-stepping the `demo` environment's approval gate.
+Nothing needs it — CI is the only pull-request-triggered workflow and uses no Azure credentials.
+`scripts/Initialize-EntraResources.ps1` deletes the subject if it finds it, and a CI invariant
+fails the build if it is reintroduced.
 
 A fork, a different branch or a different repository produces a token with a different `sub` claim, and the exchange fails. Put required reviewers on the GitHub `demo` environment and a human must approve before a token is ever minted.
 

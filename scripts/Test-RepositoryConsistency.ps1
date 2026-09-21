@@ -699,6 +699,34 @@ Assert-True -Name 'Every parameter shown in the documentation exists' `
     -Detail ($badParameters -join '; ')
 
 # ---------------------------------------------------------------------------------------------
+# Documentation must not advertise a federated credential that does not exist
+# ---------------------------------------------------------------------------------------------
+
+# The bootstrap creates exactly two federated identity credentials and actively deletes a
+# ':pull_request' one, because this identity holds Contributor and RBAC Administrator at
+# subscription scope and that subject would hand both to anything a pull request can trigger.
+# Four documents described it as existing anyway, which in a public repository reads as advice.
+
+$bootstrapScript = Get-FileText 'scripts/Initialize-EntraResources.ps1'
+
+Assert-True -Name 'The bootstrap still refuses to create a pull_request credential' `
+    -Condition ($bootstrapScript -match 'retiredCredentialSubjects') `
+    -Detail 'The removal of the pull_request subject is what the documentation assertion below depends on.'
+
+foreach ($documentation in @('docs/identity-model.md', 'docs/security-model.md', 'docs/deployment.md', 'docs/demo-script.md', 'README.md')) {
+    $text = Get-FileText $documentation
+
+    # Prose explaining why the subject is absent is the point, so only flag it being presented as
+    # something that exists: a table row, or a named credential.
+    $claimsItExists = $text -match '(?m)^\|\s*`?repo:[^`|]*:pull_request' -or
+                      $text -match 'github-pull-request'
+
+    Assert-True -Name "$documentation does not present a pull_request credential as existing" `
+        -Condition (-not $claimsItExists) `
+        -Detail 'The bootstrap never creates one and deletes it if found; documenting it as present advertises the exact escalation this repository removes.'
+}
+
+# ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)
 

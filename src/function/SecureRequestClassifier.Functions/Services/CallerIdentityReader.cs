@@ -11,8 +11,11 @@ namespace SecureRequestClassifier.Functions.Services;
 /// <param name="IsAuthenticated">True when Easy Auth injected a client principal.</param>
 /// <param name="AppId">The calling application's client id (<c>azp</c> or <c>appid</c>).</param>
 /// <param name="ObjectId">The caller's object id (<c>oid</c>).</param>
-/// <param name="TenantId">The caller's tenant id (<c>tid</c>).</param>
-/// <param name="DisplayName">A best-effort display name for logging.</param>
+/// <param name="TenantId">The caller's tenant id (<c>tid</c>). Part of the identity contract; not currently consumed.</param>
+/// <param name="DisplayName">
+/// A best-effort display name, parsed so the identity is complete. Deliberately NOT logged: it is
+/// the only personally identifying field here, and nothing needs it to correlate a request.
+/// </param>
 public sealed record CallerIdentity(
     bool IsAuthenticated,
     string? AppId,

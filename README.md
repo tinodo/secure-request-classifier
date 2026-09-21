@@ -218,7 +218,7 @@ sequenceDiagram
 │   ├── Get-SolutionImportFailure.ps1       Reads the real import error out of Dataverse
 │   ├── Set-FunctionAppDeploymentWindow.ps1 Opens/closes the transient deployment window
 │   ├── Set-PowerPlatformSubnetInjection.ps1 Links the environment to the enterprise policy
-│   ├── Test-Deployment.ps1                 30+ post-deployment assertions
+│   ├── Test-Deployment.ps1                 40+ post-deployment assertions
 │   ├── Test-FlowConnectorParameters.ps1    Flow action parameters vs the live connector schema
 │   ├── Test-RepositoryConsistency.ps1      Asserts every artefact agrees with every other
 │   ├── Invoke-PrivateConnectivityProbe.ps1 Proves private reachability and public unreachability

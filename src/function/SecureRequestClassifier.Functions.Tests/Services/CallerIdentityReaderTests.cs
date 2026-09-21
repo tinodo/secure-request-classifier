@@ -99,7 +99,7 @@ public sealed class CallerIdentityReaderTests
     }
 
     [Fact]
-    public void The_display_name_header_is_surfaced_for_logging()
+    public void The_display_name_header_is_parsed_but_never_logged()
     {
         var encoded = EncodePrincipal(("azp", "app"));
 

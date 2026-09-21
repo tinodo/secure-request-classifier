@@ -48,7 +48,8 @@ This creates, idempotently:
 
 | Resource | Note |
 | --- | --- |
-| Deployment app registration | With **three federated identity credentials** (main branch, pull requests, the `demo` environment). No client secret is created. || API app registration | Exposes `api://<appId>` and the `user_impersonation` scope, with `requestedAccessTokenVersion: 2` |
+| Deployment app registration | With **two federated identity credentials** (the `main` branch and the `demo` environment). No client secret is created, and there is deliberately no `pull_request` subject |
+| API app registration | Exposes `api://<appId>` and the `user_impersonation` scope, with `requestedAccessTokenVersion: 2` |
 | Connector service principal | For Microsoft's `7ab7862c-4c57-491e-8a45-d52a7e023983` app, created if it does not exist in your tenant |
 | Delegated permission grant | `AllPrincipals` consent so users are not prompted when creating the connection |
 | Pre-authorized application | The connector added to the API's `preAuthorizedApplications` |

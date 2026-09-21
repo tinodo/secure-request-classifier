@@ -221,7 +221,7 @@ This runs two probes side by side: one from the public internet (must fail) and 
 
 **Say, pointing at each:**
 
-* `infra/` — every Azure resource, in Bicep, in nine modules. Including the enterprise policy.
+* `infra/` — every Azure resource, in Bicep, in ten modules. Including the enterprise policy.
 * `src/function/` — the .NET 10 Function App and its tests.
 * `powerplatform/` — the unpacked solution: the flow definition, the connection references and the environment variables.
 * `scripts/` — bootstrap, verification and cleanup.
@@ -237,11 +237,11 @@ Open `docs/limitations.md` briefly. Say plainly: here is everything that cannot 
 
 **Show:** Actions → the most recent **Deploy** run, and its job graph:
 
-`validate → build-function → infrastructure → deploy-function → link-enterprise-policy → power-platform → verify`
+`validate → build-function → power-platform-environment → infrastructure → deploy-function → link-enterprise-policy → power-platform → verify`
 
 Open the run summary. It contains the deployment outputs, the function deployment mode, and the verification table.
 
-**Say:** one workflow. Fork the repository, run one bootstrap script, set the variables it prints, and press Run.
+**Say:** one workflow. Fork the repository, run one bootstrap script, set the secrets it prints, and press Run.
 
 **Proves:** the environment is reproducible. Anyone can rebuild it from scratch without tribal knowledge.
 
@@ -262,39 +262,48 @@ That assertion runs with `if: always()`. The job fails if the app is left open.
 
 **Empty.** No client secrets, no certificates.
 
-Then → **Certificates & secrets** → *Federated credentials*. Three entries:
+Then → **Certificates & secrets** → *Federated credentials*. Two entries:
 
 | Name | Subject |
 | --- | --- |
 | `github-branch-main` | `repo:<owner>/<repo>:ref:refs/heads/main` |
-| `github-pull-request` | `repo:<owner>/<repo>:pull_request` |
 | `github-environment-demo` | `repo:<owner>/<repo>:environment:demo` |
 
 **Say:** when the workflow runs, GitHub mints a short-lived OIDC token whose subject is one of those exact strings. Entra ID exchanges it for an Azure access token. There is no long-lived credential to steal, and the trust is scoped to this repository, this branch and this environment.
+
+**Worth pointing at what is missing:** there is no `:pull_request` subject. This identity is
+Contributor plus Role Based Access Control Administrator on the subscription, so a `pull_request`
+credential would hand that to anything a pull request can trigger and walk straight past the
+`demo` environment's approval gate. The bootstrap deletes that subject if it finds one, and CI
+fails the build if it comes back.
 
 Show the workflow step:
 
 ```yaml
 - uses: azure/login@v3
   with:
-    client-id: ${{ vars.AZURE_CLIENT_ID }}
-    tenant-id: ${{ vars.AZURE_TENANT_ID }}
-    subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    client-id: ${{ secrets.AZURE_CLIENT_ID }}
+    tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+    subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 ```
 
-`vars`, not `secrets`. A client ID is an identifier.
+**Say:** none of those three is a credential — they are identifiers, and on their own they grant
+nothing. They are held as *secrets* rather than variables for one practical reason: this repository
+is public, GitHub masks secrets in run logs and does not mask variables, so a variable would print
+this tenant and subscription in the clear on the first successful run.
 
 **Then the part people do not expect** — the Power Platform import step:
 
 ```yaml
 - uses: microsoft/powerplatform-actions/import-solution@v1
   with:
-    app-id:    ${{ vars.POWER_PLATFORM_APP_ID }}
-    tenant-id: ${{ vars.POWER_PLATFORM_TENANT_ID }}
+    app-id:    ${{ secrets.POWER_PLATFORM_APP_ID }}
+    tenant-id: ${{ secrets.POWER_PLATFORM_TENANT_ID }}
     # client-secret intentionally omitted -> workload identity federation
 ```
 
-The Power Platform CLI supports `--githubFederated`, so Dataverse authentication is federated too.
+Omitting `client-secret` is what selects federation: supply an app id and a tenant id without a
+secret and the action authenticates to Dataverse with the GitHub OIDC token.
 
 **Proves:** the *entire* deployment path — Azure and Power Platform — is secretless.
 
@@ -304,8 +313,12 @@ The Power Platform CLI supports `--githubFederated`, so Dataverse authentication
 
 **Show:** Settings → Secrets and variables → Actions.
 
-* **Secrets** tab: empty.
-* **Variables** tab: identifiers only — tenant ID, subscription ID, client IDs, environment URL, connection IDs.
+* **Secrets** tab: identifiers only — tenant ID, subscription ID, client IDs, the API's Application ID URI. No passwords, no client secrets, no certificates, no connection strings.
+* **Variables** tab: non-sensitive configuration only — region, environment display name, labels, feature switches.
+
+**Say:** the interesting thing is not that the Secrets tab is short, it is what *kind* of thing is
+in it. Every entry is an identifier that is useless without a token, and every one of them is there
+to be masked in a public log rather than to be kept secret from an attacker.
 
 Then the CI job that enforces it. Actions → **CI** → `security-invariants`:
 
