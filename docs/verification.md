@@ -83,7 +83,7 @@ This is the most convincing single artefact in the whole demo: the same URL, two
 dotnet test
 ```
 
-98 tests across six fixtures:
+98 tests across seven fixtures:
 
 | Fixture | Covers |
 | --- | --- |
@@ -94,10 +94,38 @@ dotnet test
 | `CallerIdentityReaderTests` | Easy Auth principal parsing, v1 and v2 claim shapes, malformed headers degrading to anonymous |
 | `ClassifyRequestFunctionTests` | HTTP status codes, `application/problem+json` shape, correlation handling, the caller allow-list |
 | `HealthFunctionTests` | Authenticated and unauthenticated probes, reported runtime and version |
-| `AuthorizationLevelTests` | **Every HTTP trigger uses `AuthorizationLevel.Anonymous`**, expected function names, routes and methods |
 
-The last fixture is worth noting: it turns the "no Function keys" claim into an assertion that
-runs on every build, rather than a statement in a document.
+The "no Function keys" claim is not left to a unit test. The `security-invariants` job in CI greps
+the source for `AuthorizationLevel.Function`, `.Admin` and `.System` and fails the build if any
+appears, so the guarantee is checked against the whole tree rather than against whichever triggers
+somebody remembered to write a test for.
+
+### The Functions host must actually start
+
+```bash
+pwsh ./scripts/Test-FunctionHostStartup.ps1
+```
+
+Building and unit-testing prove the code compiles and behaves. They do not prove the Functions
+host can start the isolated worker, which is a separate process that loads the published assemblies
+alongside the host's own. When those disagree the worker aborts, the host indexes nothing, and every
+route answers 404 — while the build, the tests and the deployment all stay green.
+
+This starts the real host against the published output and asserts that every function declared in
+the source is registered. It discovers the expected names from the `[Function]` attributes, so a new
+function is covered without anyone remembering to add it, and it ignores the host's built-in
+`WarmUp` function, which is present even when the worker is dead and would otherwise read as
+success. It runs in CI on every pull request.
+
+### Documentation links must resolve
+
+```bash
+pwsh ./scripts/Test-DocumentationLinks.ps1
+```
+
+Checks every relative link and anchor across the markdown files. A reworded heading breaks links to
+its anchor without breaking anything visible: the link still renders and still navigates, it just
+lands at the top of the page. External links are not fetched, so this works offline.
 
 ---
 

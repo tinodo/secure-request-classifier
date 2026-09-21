@@ -587,6 +587,10 @@ Assert-True -Name 'CI starts the Functions host and checks indexing' `
     -Condition ($ciWorkflow -match 'Test-FunctionHostStartup\.ps1') `
     -Detail 'Without it, a worker that cannot start ships as a green build that answers 404.'
 
+Assert-True -Name 'CI checks that documentation links resolve' `
+    -Condition ($ciWorkflow -match 'Test-DocumentationLinks\.ps1') `
+    -Detail 'A reworded heading breaks every link to its anchor without breaking anything visible.'
+
 # A push to a branch that already has a pull request is the same commit arriving twice, and each
 # trigger publishes its own check run under the same required-context name. Cancelling one does not
 # help: branch protection sees the cancelled conclusion for a required context and blocks the merge
@@ -607,6 +611,92 @@ if ($ciTriggerBlock) {
         -Condition ($ciTriggerBlock -notmatch '(?m)^\s+push:') `
         -Detail 'A push and its pull request would each publish a check run for the same required context, and a cancelled one blocks the merge.'
 }
+
+# ---------------------------------------------------------------------------------------------
+# Role assignments must be scoped to the resource they are about
+# ---------------------------------------------------------------------------------------------
+
+# A role assignment is an extension resource. Without `scope:` it attaches to whatever the
+# deployment scope happens to be -- here the resource group -- so a grant written to cover one
+# storage account silently covers everything in the group. The template still reads as least
+# privilege, which is what makes it worth asserting rather than trusting.
+
+$roleAssignmentModule = Get-FileText 'infra/modules/role-assignment.bicep'
+
+$roleAssignmentDeclarations = [regex]::Matches(
+    $roleAssignmentModule,
+    "(?s)resource\s+\w+\s+'Microsoft\.Authorization/roleAssignments@[^']+'\s*=[^{]*\{(.*?)\r?\n\}")
+
+Assert-True -Name 'role-assignment.bicep declares at least one role assignment' `
+    -Condition ($roleAssignmentDeclarations.Count -gt 0) `
+    -Detail 'The scope assertion below would otherwise pass by finding nothing.'
+
+foreach ($declaration in $roleAssignmentDeclarations) {
+    Assert-True -Name 'Every role assignment sets an explicit scope' `
+        -Condition ($declaration.Groups[1].Value -match '(?m)^\s*scope:\s*\S') `
+        -Detail 'Without scope: the assignment lands on the resource group, which is wider than intended.'
+}
+
+Assert-True -Name 'main.bicep does not pass the removed scopeResourceId parameter' `
+    -Condition ($mainBicep -notmatch 'scopeResourceId') `
+    -Detail 'That parameter was only ever used inside guid(), so it never scoped anything.'
+
+# ---------------------------------------------------------------------------------------------
+# Documented script parameters must exist
+# ---------------------------------------------------------------------------------------------
+
+# A renamed or removed parameter leaves the documentation telling the reader to run a command that
+# fails on the spot with "A parameter cannot be found that matches parameter name". Nothing else in
+# the build notices, because no build step runs the commands printed in a document.
+
+$documentationFiles = @(Join-Path $RepositoryRoot 'README.md') +
+    @(Get-ChildItem -Path (Join-Path $RepositoryRoot 'docs') -Filter '*.md' -File | ForEach-Object { $_.FullName })
+
+$parameterCache = @{}
+$badParameters = [System.Collections.Generic.List[string]]::new()
+$invocationsChecked = 0
+
+foreach ($documentationFile in $documentationFiles) {
+    $text = Get-Content -Path $documentationFile -Raw
+    $shortName = Split-Path $documentationFile -Leaf
+
+    # A PowerShell invocation in a fenced block may be split across lines with a backtick, so the
+    # match has to continue through those continuations to see every parameter.
+    foreach ($invocation in [regex]::Matches($text, '(?s)scripts/([A-Za-z-]+\.ps1)((?:[^\r\n]*(?:`\r?\n[^\r\n]*)*))')) {
+        $scriptName = $invocation.Groups[1].Value
+        $scriptPath = Join-Path $RepositoryRoot "scripts/$scriptName"
+
+        if (-not (Test-Path $scriptPath)) {
+            $badParameters.Add("$shortName references scripts/$scriptName, which does not exist")
+            continue
+        }
+
+        if (-not $parameterCache.ContainsKey($scriptName)) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Resolve-Path $scriptPath).Path, [ref]$null, [ref]$null)
+            $parameterCache[$scriptName] = @($ast.ParamBlock.Parameters |
+                ForEach-Object { $_.Name.VariablePath.UserPath })
+        }
+
+        $invocationsChecked++
+
+        foreach ($supplied in [regex]::Matches($invocation.Groups[2].Value, '-([A-Z][A-Za-z]+)')) {
+            $name = $supplied.Groups[1].Value
+            if ($name -in $parameterCache[$scriptName]) { continue }
+            if ($name -in @('Verbose', 'Debug', 'ErrorAction', 'WarningAction', 'WhatIf', 'Confirm')) { continue }
+
+            $badParameters.Add("$shortName passes -$name to $scriptName, which has no such parameter")
+        }
+    }
+}
+
+Assert-True -Name 'Documentation shows at least one script invocation' `
+    -Condition ($invocationsChecked -gt 0) `
+    -Detail 'Nothing was checked, so this assertion could not fail.'
+
+Assert-True -Name 'Every parameter shown in the documentation exists' `
+    -Condition ($badParameters.Count -eq 0) `
+    -Detail ($badParameters -join '; ')
 
 # ---------------------------------------------------------------------------------------------
 

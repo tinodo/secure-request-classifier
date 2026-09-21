@@ -4,6 +4,110 @@ Symptom → cause → fix. Ordered roughly by how often each one bites.
 
 ---
 
+## The flow returns 404 from `*.azure-apihub.net`
+
+### Symptom
+
+The flow run fails on `Invoke_classification_API`. The error comes from the connector rather than
+from the function app, and names an `azure-apihub.net` host:
+
+```json
+{
+  "error": {
+    "code": 404,
+    "source": "europe002-002.azure-apihub.net",
+    "message": "The response is not in a JSON format.",
+    "innerError": "Cannot read server response."
+  }
+}
+```
+
+### Cause A — Power Platform has not finished settling
+
+Enabling or changing subnet injection leaves the environment unstable for up to 30 minutes. Until
+it settles, the connector cannot route to the delegated subnet and reports it as a 404.
+
+**Fix.** Wait, then run the flow again. Do not change anything first: everything else about this
+symptom looks identical to a real failure, and the usual outcome is that a second run simply works.
+
+### Cause B — the function app has no functions registered
+
+If the isolated worker cannot start, the host registers nothing, keeps only its own built-in
+warm-up endpoint, and answers 404 on every real route. Deployment still reports success, because
+publishing a worker that cannot run is not a deployment failure.
+
+Check what the app actually has:
+
+```powershell
+az functionapp function list `
+    --name <function-app> --resource-group <rg> --subscription <sub> `
+    --query "[].name" -o tsv
+```
+
+`ClassifyRequest` and `Health` should both be listed. If only `WarmUp` appears, or nothing does,
+the worker is crashing. The reason is in Application Insights:
+
+```
+AppTraces
+| where TimeGenerated > ago(1h)
+| where Message has_any ("functions found", "language worker", "Unhandled exception")
+| project TimeGenerated, Message
+| order by TimeGenerated desc
+```
+
+A worker that is failing to start looks like this, repeatedly:
+
+```
+Failed to start language worker process for runtime: dotnet-isolated
+dotnet exited with code 134 (0x86). Unhandled exception. System.TypeLoadException: ...
+Exceeded language worker restart retry count for runtime:dotnet-isolated
+0 functions found (Custom)
+```
+
+`0 functions found (Custom)` on its own is **not** a fault — the host runs more than one metadata
+provider and this project has no `functions.metadata` file, so that line appears in a perfectly
+healthy start, immediately before worker indexing finds everything. Judge it by whether
+`Found the following functions:` follows.
+
+**Fix.** Whatever the exception names. The one this repository hit was a dependency conflict:
+`Microsoft.Azure.Functions.Worker.ApplicationInsights` binds against Application Insights 2.x, and
+a bump to 3.x moved `ITelemetryInitializer` out from under it. `Microsoft.ApplicationInsights.WorkerService`
+is pinned to 2.x for that reason, and `scripts/Test-FunctionHostStartup.ps1` runs in CI to start the
+real host and assert every function indexes, so this class of failure cannot reach a deployment again.
+
+### Cause C — the flow is pointing somewhere that does not exist
+
+Check that `srcls_FunctionBaseUrl` and `srcls_FunctionClassifyPath` in the solution's environment
+variables match the deployed app and the route the function declares.
+
+---
+
+## Application Insights and Log Analytics show no data
+
+### Cause A — nothing has run
+
+Flex Consumption scales to zero. With no traffic there is no telemetry, and the portal's empty
+state looks the same as a broken pipeline. Run the flow, wait a couple of minutes, and look again.
+
+### Cause B — the worker is not starting
+
+Telemetry is emitted by the worker. If it aborts during start-up it produces nothing, so an app
+that answers 404 on every route and has an empty Application Insights is one symptom, not two. See
+[the 404 entry above](#the-flow-returns-404-from-azure-apihubnet).
+
+### Cause C — the portal is querying the wrong thing
+
+The portal has been observed showing "no data" while the workspace held thousands of rows. Query
+the workspace directly before believing it:
+
+```powershell
+az monitor log-analytics query `
+    --workspace <workspace-guid> `
+    --analytics-query "AppTraces | where TimeGenerated > ago(24h) | summarize n=count(), mostRecent=max(TimeGenerated)"
+```
+
+---
+
 ## The flow fails with 403 Forbidden
 
 ### Symptom
@@ -215,10 +319,10 @@ connection. The attempt also destroys a binding that was already working.
 
 ### Fix
 
-The deployment settings file must contain **no `ConnectionReferences` section**, and no
-`CONNECTION_ID_*` values should be supplied to `scripts/New-DeploymentSettings.ps1`. Connections
-are created and bound by a person in the flow designer, once per environment, and the pipeline
-leaves them alone.
+The deployment settings file must contain **no `ConnectionReferences` section**. Nothing in the
+pipeline supplies connection IDs, and nothing should: connections are selected by a person in the
+flow designer, and the pipeline leaves them alone. `scripts/Test-RepositoryConsistency.ps1` asserts
+the section stays absent.
 
 See [limitations.md](limitations.md#2-connections-are-created-and-bound-by-a-person-once-per-environment).
 
@@ -227,12 +331,16 @@ See [limitations.md](limitations.md#2-connections-are-created-and-bound-by-a-per
 ## The flow imports but shows "Invalid connection", or cannot be turned on
 
 ### Cause
-Its connection references are not bound to connections yet. This is expected on a new environment.
+Its connection references are not bound to connections. This is expected on a new environment —
+and it is also expected **after every redeployment**, because the import replaces the flow with the
+version in source control, which has nothing selected and is switched off.
 
 ### Fix
-Open the flow in Power Automate, create a connection on each action that needs one, save, and turn
-the flow on. Full steps in
-[deployment.md](deployment.md#create-the-connections-and-turn-the-flow-on).
+Open the flow in Power Automate, select a connection on each action that needs one, save, and turn
+the flow on. On a redeployment the connections still exist, so this is a pick from a list rather
+than a sign-in. Full steps in
+[deployment.md](deployment.md#create-the-connections-and-turn-the-flow-on), and what else a
+redeployment resets in [deployment.md](deployment.md#what-a-redeployment-resets).
 
 ---
 
@@ -306,14 +414,18 @@ Deploy workflow ahead of the import.
 
 ---
 
-## The canvas app is missing from the solution
+## There is no canvas app in the solution
 
-### Expected on a clean clone.
-`pac canvas pack` cannot build an `.msapp` from YAML that has not been through Power Apps Studio. `Build-Solution.ps1` reports this and continues.
+### Expected. There never is one.
+This repository does not deploy a Power App, and the maker portal will not show one. `pac canvas pack`
+is deprecated and cannot build an `.msapp` from YAML that has not been through Power Apps Studio, so
+a pipeline cannot produce one from a clean clone.
 
-The flow still deploys. Run it from Power Automate — the PowerApps (V2) trigger renders an input form — and the whole private-network path is exercised.
+Run the flow from Power Automate instead — the PowerApps (V2) trigger renders a typed input form,
+and the whole private-network path is exercised.
 
-To add the app permanently, follow [limitations.md](limitations.md#1-the-canvas-app-msapp-cannot-be-built-from-source-in-ci).
+If you want an app anyway, the one-time steps are in
+[limitations.md](limitations.md#1-there-is-no-canvas-app-and-one-cannot-be-built-in-ci).
 
 ---
 

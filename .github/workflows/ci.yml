@@ -210,6 +210,13 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-RepositoryConsistency.ps1
 
+      # A reworded heading silently breaks every link to its anchor: the link still renders, and
+      # still navigates, it just lands at the top of the page instead. That reads to a customer as
+      # their own mistake rather than the document's.
+      - name: Check that every documentation link resolves
+        shell: pwsh
+        run: ./scripts/Test-DocumentationLinks.ps1
+
   security-invariants:
     name: Security invariants
     runs-on: ubuntu-latest

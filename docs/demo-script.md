@@ -10,12 +10,18 @@ Run through it once beforehand: stages 6–10 depend on a working connection and
 
 | Check | Command |
 | --- | --- |
-| Everything is deployed and healthy | `pwsh ./scripts/Test-Deployment.ps1 -ResourceGroupName rg-srclass-demo` |
-| A connection exists for the connector | Power Automate → Connections |
+| Everything is deployed and healthy | `pwsh ./scripts/Test-Deployment.ps1 -ResourceGroupName rg-srclass-demo -SubscriptionId <subscription-guid>` |
+| **Both connections are selected and the flow is switched on** | Power Automate → the **Classify and Notify** flow. It is off after every deployment, and a flow that is off simply does nothing |
+| The flow actually runs end to end | Run it once. The first run after a network change can fail before it works |
 | The environment is linked to the policy | included in the verification output |
-| You have two browser windows | Azure portal, and Power Apps / Power Automate |
+| You have two browser windows | Azure portal, and Power Automate |
 
 Have a terminal open. Several stages are far more convincing from a command line than from a portal blade.
+
+> **Do not deploy on the morning of the demo.** Importing the solution replaces the flow, which
+> arrives with no connections selected and switched off, so a deployment undoes the setup you did
+> last time. If you must deploy, allow time to reselect both connections, save, turn the flow on,
+> and run it once. See [deployment.md](deployment.md#what-a-redeployment-resets).
 
 **Framing sentence to open with:**
 
@@ -217,7 +223,7 @@ This runs two probes side by side: one from the public internet (must fail) and 
 
 * `infra/` — every Azure resource, in Bicep, in nine modules. Including the enterprise policy.
 * `src/function/` — the .NET 10 Function App and its tests.
-* `powerplatform/` — the unpacked solution: the flow definition, the connection references, the environment variables, and the Power Fx source of the app.
+* `powerplatform/` — the unpacked solution: the flow definition, the connection references and the environment variables.
 * `scripts/` — bootstrap, verification and cleanup.
 * `docs/` — architecture, networking, security, identity and a full limitations register.
 

@@ -162,12 +162,11 @@ Deterministic, by design. No AI, no database, no external call.
 
 ## Identity flow at runtime
 
-1. The user signs in to Power Apps.
-2. The app calls the flow. The flow runs as the invoker.
-3. The `HTTP with Microsoft Entra ID (preauthorized)` connector requests a token for `api://<apiAppId>` **on behalf of the signed-in user**, using the delegated permission grant created during bootstrap.
-4. The connector container in the delegated subnet sends the request with that bearer token.
-5. App Service Authentication validates issuer, audience and `allowedApplications`, then injects `X-MS-CLIENT-PRINCIPAL`.
-6. The worker reads the principal for logging and optional defence-in-depth checks.
+1. The user signs in to Power Automate and runs the flow. The flow runs as the invoker.
+2. The `HTTP with Microsoft Entra ID (preauthorized)` connector requests a token for `api://<apiAppId>` **on behalf of the signed-in user**, using the delegated permission grant created during bootstrap.
+3. The connector container in the delegated subnet sends the request with that bearer token.
+4. App Service Authentication validates issuer, audience and `allowedApplications`, then injects `X-MS-CLIENT-PRINCIPAL`.
+5. The worker reads the principal for logging and optional defence-in-depth checks.
 
 At no point does any component hold a shared secret.
 
@@ -178,26 +177,40 @@ At no point does any component hold a shared secret.
 ```mermaid
 flowchart LR
     subgraph gh["GitHub Actions"]
-        V["validate<br/>build · test · lint · pack"]
+        V["validate<br/>build · test · host start · lint · pack"]
         BF["build-function<br/>dotnet publish"]
+        PPE["power-platform-environment<br/>create · Managed Environments"]
         I["infrastructure<br/>az deployment sub create"]
         DF["deploy-function<br/>package + reseal"]
         L["link-enterprise-policy"]
         PP["power-platform<br/>import solution"]
-        VER["verify<br/>30+ assertions"]
+        VER["verify<br/>40+ assertions"]
     end
 
+    MAN["a person selects the two<br/>connections and turns the flow on"]
+
     V --> BF --> DF
+    V --> PPE
     V --> I --> DF
     I --> L
+    PPE --> L
     I --> PP
+    PPE --> PP
     DF --> PP
     DF --> VER
     L --> VER
     PP --> VER
+    PP -.->|"still required, every time<br/>the solution is imported"| MAN
+
+    classDef manual fill:#fff4e6,stroke:#d9822b,stroke-width:2px
+    class MAN manual
 ```
 
 Every job authenticates with a fresh OIDC token. Nothing is carried between jobs except artefacts and non-secret outputs.
+
+The dashed step is not a gap in the automation so much as the boundary of what can be automated
+without storing a credential: both connectors sign in as a person. It is needed after every import,
+not only the first — see [deployment.md](deployment.md#what-a-redeployment-resets).
 
 ---
 
