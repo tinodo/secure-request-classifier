@@ -12,12 +12,15 @@
                 publicNetworkAccess disabled this must fail to connect (or be rejected before
                 it reaches the app).
 
-      Private - a container instance placed directly in the demo's private endpoint subnet,
-                which resolves the Function App host name through the workload's own Azure
-                Private DNS zone and calls /api/health.
+      Private - a container instance inside the demo's virtual network, which resolves the
+                Function App host name through the workload's own Azure Private DNS zone and
+                calls /api/health. Azure Container Instances requires a subnet delegated to
+                Microsoft.ContainerInstance/containerGroups, and the private endpoint subnet is
+                not delegated, so the script carves out a dedicated /28 for the probe.
 
-    The private probe is created and deleted by this script, inside the demo resource group,
-    so it leaves nothing behind.
+    Both the container and the probe subnet are created and removed by this script, inside the
+    demo resource group, so it leaves nothing behind. A probe subnet that already existed before
+    the run is left in place.
 
     The health endpoint is excluded from App Service Authentication precisely so this probe
     can separate "the network path works" from "the caller is authenticated". The business
@@ -27,7 +30,8 @@
     Resource group containing the demo.
 
 .PARAMETER KeepProbe
-    Leave the container instance in place afterwards (useful while troubleshooting).
+    Leave the container instance and the probe subnet in place afterwards (useful while
+    troubleshooting).
 
 .EXAMPLE
     ./Invoke-PrivateConnectivityProbe.ps1 -ResourceGroupName rg-srclass-demo
@@ -185,6 +189,25 @@ if (-not $KeepProbe) {
     Write-Host ''
     Write-Host "    deleting container instance '$ProbeName'"
     az container delete --resource-group $ResourceGroupName --name $ProbeName --yes --only-show-errors --output none
+
+    # The probe subnet is created by this script, so this script removes it. Leaving it behind
+    # accumulates a delegated /28 per run and leaves an address range claimed in the customer's
+    # network for a container that no longer exists. A subnet this script did not create -- one
+    # that already existed when it started -- is left alone.
+    if (-not $existingProbeSubnet) {
+        Write-Host "    deleting probe subnet '$probeSubnetName'"
+
+        az network vnet subnet delete `
+            --resource-group $ResourceGroupName `
+            --vnet-name $virtualNetwork.name `
+            --name $probeSubnetName `
+            --only-show-errors --output none
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Could not delete the probe subnet '$probeSubnetName'. Remove it by hand, or re-run once the container has fully released it."
+            $global:LASTEXITCODE = 0
+        }
+    }
 }
 
 # ---------------------------------------------------------------------------------------------

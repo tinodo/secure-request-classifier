@@ -40,6 +40,14 @@
     Create the identities but do not attempt Azure role assignments. Use when a separate
     person or process owns RBAC.
 
+.PARAMETER SkipPowerPlatformAdminRole
+    Do not grant the deployment identity the Power Platform Administrator directory role.
+
+    That role is what lets the pipeline link the enterprise policy to the environment, which is
+    the step that puts Power Platform traffic into your virtual network. Without it the deploy
+    still provisions everything else, and the `link-enterprise-policy` job fails. Use this when a
+    directory administrator grants the role separately, then re-run the deployment.
+
 .EXAMPLE
     ./Initialize-EntraResources.ps1 -GitHubRepository contoso/secure-request-classifier `
         -SubscriptionId 00000000-0000-0000-0000-000000000000

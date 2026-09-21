@@ -56,10 +56,22 @@
     secrets re-set before deploying again.
 
 .PARAMETER Force
-    Do not prompt for confirmation.
+    Delete without prompting. It suppresses the confirmation, it does not override -WhatIf:
+    `-Force -WhatIf` previews and deletes nothing.
+
+.PARAMETER SkipTagCheck
+    Delete the resource group even if it is not tagged workload=secure-request-classifier.
+
+    That tag is the guard that stops this script being aimed at the wrong resource group, so
+    skipping it removes the only thing standing between a mistyped name and somebody else's
+    estate. Use it only when you know the group was created by this demo and the tag was lost,
+    and read the name back to yourself before pressing enter.
 
 .EXAMPLE
     ./Remove-Demo.ps1 -ResourceGroupName rg-srclass-demo -PowerPlatformEnvironmentId 1111... -WhatIf
+
+.EXAMPLE
+    ./Remove-Demo.ps1 -ResourceGroupName rg-srclass-demo -PowerPlatformEnvironmentName srclass-demo -Force
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(

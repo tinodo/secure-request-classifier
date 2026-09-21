@@ -286,6 +286,47 @@
             }
           }
         },
+        "Respond_when_the_notification_fails": {
+          "runAfter": {
+            "Send_confirmation_email": [
+              "Failed",
+              "TimedOut",
+              "Skipped"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "9a4c1e07-3b58-4d6f-8e21-7c0f5b93a6d4"
+          },
+          "type": "Response",
+          "kind": "PowerApp",
+          "description": "The classification is the business outcome; the email is a side effect. Without this branch a request that was classified successfully but could not be emailed returned nothing at all, and the run failed opaquely.",
+          "inputs": {
+            "statusCode": 200,
+            "body": {
+              "requestId": "@body('Parse_classification_response')?['requestId']",
+              "status": "@body('Parse_classification_response')?['status']",
+              "priority": "@body('Parse_classification_response')?['priority']",
+              "assignedTeam": "@body('Parse_classification_response')?['assignedTeam']",
+              "normalizedCategory": "@body('Parse_classification_response')?['normalizedCategory']",
+              "targetResponseDate": "@body('Parse_classification_response')?['targetResponseDate']",
+              "classificationReason": "@{concat(body('Parse_classification_response')?['classificationReason'], ' The confirmation email could not be sent, so the requester has not been notified. The classification itself succeeded.')}",
+              "correlationId": "@body('Parse_classification_response')?['correlationId']"
+            },
+            "schema": {
+              "type": "object",
+              "properties": {
+                "requestId": { "title": "requestId", "x-ms-dynamically-added": true, "type": "string" },
+                "status": { "title": "status", "x-ms-dynamically-added": true, "type": "string" },
+                "priority": { "title": "priority", "x-ms-dynamically-added": true, "type": "string" },
+                "assignedTeam": { "title": "assignedTeam", "x-ms-dynamically-added": true, "type": "string" },
+                "normalizedCategory": { "title": "normalizedCategory", "x-ms-dynamically-added": true, "type": "string" },
+                "targetResponseDate": { "title": "targetResponseDate", "x-ms-dynamically-added": true, "type": "string" },
+                "classificationReason": { "title": "classificationReason", "x-ms-dynamically-added": true, "type": "string" },
+                "correlationId": { "title": "correlationId", "x-ms-dynamically-added": true, "type": "string" }
+              }
+            }
+          }
+        },
         "Respond_with_the_failure": {
           "runAfter": {
             "Invoke_classification_API": [
@@ -299,7 +340,7 @@
           "type": "Response",
           "kind": "PowerApp",
           "inputs": {
-            "statusCode": 502,
+            "statusCode": "@{if(greater(coalesce(outputs('Invoke_classification_API')?['statusCode'], 0), 0), outputs('Invoke_classification_API')?['statusCode'], 502)}",
             "body": {
               "requestId": "",
               "status": "Failed",
@@ -307,7 +348,7 @@
               "assignedTeam": "",
               "normalizedCategory": "",
               "targetResponseDate": "",
-              "classificationReason": "@{concat('The classification service could not be reached or returned an error. Correlation ID ', variables('correlationId'), '. Check that the Power Platform environment is linked to the virtual network enterprise policy and that the private endpoint resolves.')}",
+              "classificationReason": "@{concat(coalesce(body('Invoke_classification_API')?['title'], 'The classification service could not be reached'), '. ', coalesce(body('Invoke_classification_API')?['detail'], 'Nothing answered on the private endpoint. Check that the Power Platform environment is linked to the virtual network enterprise policy and that the host name resolves to a private address.'), ' Correlation ID ', variables('correlationId'), '.')}",
               "correlationId": "@variables('correlationId')"
             },
             "schema": {
