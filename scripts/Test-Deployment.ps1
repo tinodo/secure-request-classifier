@@ -357,46 +357,42 @@ else {
 if ($functionApp -and $functionApp.identity -and $functionApp.identity.principalId) {
     $principalId = $functionApp.identity.principalId
 
-    # `az role assignment list --assignee` resolves the principal through Microsoft Graph first.
-    # A caller who can read ARM but not the directory -- a guest, or anyone without directory read
-    # -- gets an empty list rather than an error, so correct infrastructure is reported as missing
-    # RBAC. Querying ARM directly needs no directory access, so it is the primary source here and
-    # the CLI is only a fallback.
-    $subscriptionId = ($functionApp.id -split '/')[2]
-    $filter = [uri]::EscapeDataString("principalId eq '$principalId'")
-    $assignmentsUrl = "https://management.azure.com/subscriptions/$subscriptionId/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&`$filter=$filter"
-
-    $assignments = @()
-    $rest = Invoke-Az @('rest', '--method', 'get', '--url', $assignmentsUrl, '--output', 'json')
-
-    if ($rest -and $rest.PSObject.Properties['value']) {
-        $assignments = @($rest.value | ForEach-Object {
-            [pscustomobject]@{
-                RoleDefinitionGuid = ($_.properties.roleDefinitionId -split '/')[-1]
-                Scope              = $_.properties.scope
-            }
-        })
-    }
-
-    if ($assignments.Count -eq 0) {
-        $cli = Invoke-Az @('role', 'assignment', 'list', '--assignee', $principalId, '--all', '--output', 'json')
-        $assignments = @($cli | ForEach-Object {
-            [pscustomobject]@{
-                RoleDefinitionGuid = ($_.roleDefinitionId -split '/')[-1]
-                Scope              = $_.scope
-            }
-        })
-    }
-
-    # Each role belongs on one resource, not on the resource group. Checking only that the role
-    # exists somewhere passed for a long time while every assignment actually sat at resource group
-    # scope -- the whole estate rather than the one account or component the identity should reach.
     $insightsComponents = Invoke-Az @('resource', 'list', '--resource-group', $ResourceGroupName,
         '--resource-type', 'Microsoft.Insights/components', '--output', 'json')
     $insightsForRbac = $insightsComponents | Select-Object -First 1
 
     $storageId = if ($storageAccount) { $storageAccount.id } else { $null }
     $insightsId = if ($insightsForRbac) { $insightsForRbac.id } else { $null }
+
+    # Listing role assignments at a scope returns that scope and everything it inherits from, never
+    # anything below it. These assignments are scoped to individual resources, so asking at the
+    # resource group finds nothing and asking at the resource itself finds them. This is the single
+    # most common way an RBAC check reports a false negative.
+    #
+    # `az role assignment list --assignee` is avoided as the primary source because it resolves the
+    # principal through Microsoft Graph first: a caller who can read ARM but not the directory --
+    # any guest, for instance -- gets an empty list rather than an error, so a correct deployment is
+    # reported as having no RBAC at all.
+    #
+    # Only one query parameter is used, deliberately. On Windows the CLI goes through cmd.exe, which
+    # treats an unquoted `&` as a command separator, so a URL carrying both api-version and $filter
+    # is cut in half before az ever sees it. Filtering happens here instead.
+    function Get-RoleAssignmentsAtScope {
+        param([Parameter(Mandatory)][string] $Scope)
+
+        $url = "https://management.azure.com$Scope/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01"
+        $response = Invoke-Az @('rest', '--method', 'get', '--url', $url, '--output', 'json')
+
+        if (-not $response -or -not $response.PSObject.Properties['value']) { return $null }
+
+        return @($response.value | ForEach-Object {
+            [pscustomobject]@{
+                PrincipalId        = $_.properties.principalId
+                RoleDefinitionGuid = ($_.properties.roleDefinitionId -split '/')[-1]
+                Scope              = $_.properties.scope
+            }
+        })
+    }
 
     # Built-in role definition GUIDs, matching the roles map in infra/main.bicep.
     $expectedRoles = @(
@@ -406,35 +402,105 @@ if ($functionApp -and $functionApp.identity -and $functionApp.identity.principal
         @{ Name = 'Monitoring Metrics Publisher';   Guid = '3913510d-42f4-4e42-8a64-420c390055eb'; Target = $insightsId; Kind = 'the Application Insights component' }
     )
 
+    # Cache one lookup per distinct target, and remember whether the directory could be read at all.
+    $assignmentsByScope = @{}
+    $anyScopeReadable = $false
+
+    foreach ($scope in @($expectedRoles | ForEach-Object { $_.Target } | Where-Object { $_ } | Sort-Object -Unique)) {
+        $found = Get-RoleAssignmentsAtScope -Scope $scope
+        $assignmentsByScope[$scope] = $found
+        if ($null -ne $found) { $anyScopeReadable = $true }
+    }
+
+    # The storage roles have independent proof: the host cannot start without reading its own
+    # deployment package, and with shared key access disabled managed identity is the only way to
+    # do that. So if a storage role cannot be found even though the host is running, the grant is
+    # present and this caller simply cannot see it -- which means it cannot see the Application
+    # Insights grant either, and that one has no equivalent proof to fall back on.
+    $hostIsRunning = $functions -and @($functions).Count -gt 0
+    $sharedKeysDisabled = $storageAccount -and $storageAccount.allowSharedKeyAccess -eq $false
+
+    $storageRoleGuids = @($expectedRoles | Where-Object { $_.Target -eq $storageId } | ForEach-Object { $_.Guid })
+    $storageRolesVisible = @(@($assignmentsByScope[$storageId]) |
+        Where-Object { $_.PrincipalId -eq $principalId -and $_.RoleDefinitionGuid -in $storageRoleGuids }).Count -gt 0
+
+    $rbacReadsUnavailable = $hostIsRunning -and $sharedKeysDisabled -and $storageId -and -not $storageRolesVisible
+
     foreach ($role in $expectedRoles) {
-        $matching = @($assignments | Where-Object { $_.RoleDefinitionGuid -eq $role.Guid })
-
-        if ($matching.Count -eq 0) {
-            Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Fail' `
-                -Detail "No assignment of $($role.Guid) found for $principalId."
-            continue
-        }
-
-        Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Pass'
-
         if (-not $role.Target) {
-            Add-Result -Name "$($role.Name) is scoped to $($role.Kind)" -Status 'Warn' `
-                -Detail 'The target resource was not found, so the scope could not be checked.'
+            Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Warn' `
+                -Detail 'The resource this role applies to was not found, so the assignment could not be checked.'
             continue
         }
 
-        if (@($matching | Where-Object { $_.Scope -eq $role.Target }).Count -gt 0) {
-            Add-Result -Name "$($role.Name) is scoped to $($role.Kind)" -Status 'Pass'
+        $atTarget = @($assignmentsByScope[$role.Target])
+        $matching = @($atTarget | Where-Object { $_.PrincipalId -eq $principalId -and $_.RoleDefinitionGuid -eq $role.Guid })
+
+        if ($matching.Count -gt 0) {
+            $exact = @($matching | Where-Object { $_.Scope -eq $role.Target })
+
+            if ($exact.Count -gt 0) {
+                Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Pass' `
+                    -Detail "Scoped to $($role.Kind), which is as narrow as this role can be."
+            }
+            else {
+                Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Warn' `
+                    -Detail "Inherited from $(($matching | ForEach-Object { $_.Scope }) -join ', ') rather than assigned on $($role.Kind). Access works, but it is wider than intended."
+            }
+            continue
+        }
+
+        # Nothing matched. Before calling that a failure, weigh it against what the rest of this
+        # script has already established -- see $rbacReadsUnavailable above. Reading role
+        # assignments needs Microsoft.Authorization/roleAssignments/read on the scope, which plenty
+        # of legitimate operators, guests especially, do not have. Reporting a working deployment
+        # as broken is the worse error, so that case is a warning that names exactly which of the
+        # two possibilities it could not separate.
+        if ($rbacReadsUnavailable) {
+            Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Warn' `
+                -Detail 'Not readable with these credentials. The host is running with shared key access disabled, which is impossible without a working managed-identity grant, so role assignments exist but cannot be listed here. Grant Microsoft.Authorization/roleAssignments/read to check directly.'
+        }
+        elseif ($anyScopeReadable) {
+            Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Fail' `
+                -Detail "No assignment of $($role.Guid) for $principalId on or above $($role.Kind)."
         }
         else {
-            Add-Result -Name "$($role.Name) is scoped to $($role.Kind)" -Status 'Warn' `
-                -Detail "Scoped to $(($matching | ForEach-Object { $_.Scope }) -join ', ') rather than $($role.Target). Access still works; it is simply wider than intended."
+            Add-Result -Name "Managed identity role assigned: $($role.Name)" -Status 'Warn' `
+                -Detail 'Role assignments could not be read with these credentials, so presence could not be confirmed either way. Microsoft.Authorization/roleAssignments/read on the resource is required.'
         }
     }
 
-    $overPrivileged = $roleNames | Where-Object { $_ -in @('Owner', 'Contributor', 'User Access Administrator') }
-    if ($overPrivileged) {
-        Add-Result -Name 'Managed identity is least privilege' -Status 'Fail' -Detail "Holds broad role(s): $($overPrivileged -join ', ')"
+    # Least privilege is about what the identity must NOT hold, so it has to look wider than the
+    # two target resources: a broad role granted higher up is inherited and would not show up in
+    # the per-resource lookups above.
+    $broadRoles = @{
+        '8e3af657-a8ff-443c-a75c-2fe8c4bcb635' = 'Owner'
+        'b24988ac-6180-42a0-ab88-20f7382dd24c' = 'Contributor'
+        '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9' = 'User Access Administrator'
+    }
+
+    $inheritedScopes = @(
+        "/subscriptions/$(($functionApp.id -split '/')[2])/resourceGroups/$ResourceGroupName"
+        "/subscriptions/$(($functionApp.id -split '/')[2])"
+    )
+
+    $wideAssignments = @()
+    $couldReadWideScopes = $false
+
+    foreach ($scope in $inheritedScopes) {
+        $found = Get-RoleAssignmentsAtScope -Scope $scope
+        if ($null -eq $found) { continue }
+        $couldReadWideScopes = $true
+        $wideAssignments += @($found | Where-Object { $_.PrincipalId -eq $principalId -and $broadRoles.ContainsKey($_.RoleDefinitionGuid) })
+    }
+
+    if (-not $couldReadWideScopes) {
+        Add-Result -Name 'Managed identity is least privilege' -Status 'Warn' `
+            -Detail 'Role assignments could not be read with these credentials, so this could not be confirmed.'
+    }
+    elseif ($wideAssignments.Count -gt 0) {
+        $names = @($wideAssignments | ForEach-Object { $broadRoles[$_.RoleDefinitionGuid] } | Sort-Object -Unique)
+        Add-Result -Name 'Managed identity is least privilege' -Status 'Fail' -Detail "Holds broad role(s): $($names -join ', ')"
     }
     else {
         Add-Result -Name 'Managed identity is least privilege' -Status 'Pass' -Detail 'No Owner, Contributor or User Access Administrator assignment.'
