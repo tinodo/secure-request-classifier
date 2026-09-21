@@ -174,7 +174,7 @@ It is the only HTTP-style connector on Microsoft's supported-services list for P
 Two constraints that follow:
 
 * Under VNet support, the **Get web resource** action is unsupported. The flow uses **Invoke an HTTP request** (`InvokeHttp`).
-* The connection is a **delegated user** connection. There is no service-principal option without a certificate secret. See [limitations.md](limitations.md#2-the-connector-connection-must-be-created-once-by-a-person).
+* The connection is a **delegated user** connection. There is no service-principal option without a certificate secret. See [limitations.md](limitations.md#2-connections-are-created-and-bound-by-a-person-once-per-environment).
 
 ---
 

@@ -587,6 +587,10 @@ Assert-True -Name 'CI starts the Functions host and checks indexing' `
     -Condition ($ciWorkflow -match 'Test-FunctionHostStartup\.ps1') `
     -Detail 'Without it, a worker that cannot start ships as a green build that answers 404.'
 
+Assert-True -Name 'CI checks that documentation links resolve' `
+    -Condition ($ciWorkflow -match 'Test-DocumentationLinks\.ps1') `
+    -Detail 'A reworded heading breaks every link to its anchor without breaking anything visible.'
+
 # A push to a branch that already has a pull request is the same commit arriving twice, and each
 # trigger publishes its own check run under the same required-context name. Cancelling one does not
 # help: branch protection sees the cancelled conclusion for a required context and blocks the merge

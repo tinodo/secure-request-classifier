@@ -100,6 +100,6 @@ Write-Host "Wrote deployment settings to $OutputPath" -ForegroundColor Green
 Write-Host ''
 Write-Host 'Resolved tokens:'
 foreach ($key in $resolved.Keys) {
-    $display = if ($key -like 'CONNECTION_ID_*' -and $resolved[$key]) { "$($resolved[$key].Substring(0, [Math]::Min(8, $resolved[$key].Length)))..." } else { $resolved[$key] }
+    $display = $resolved[$key]
     Write-Host ('  {0,-30} {1}' -f $key, ($display ? $display : '(not supplied)'))
 }

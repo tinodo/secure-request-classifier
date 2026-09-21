@@ -606,23 +606,25 @@ jobs:
             echo "| Function base URL | \`${{ needs.infrastructure.outputs.function-base-url }}\` |"
             echo "| Authentication | GitHub OIDC (workload identity federation), no client secret |"
             echo
-            echo "### One manual step remains: create the two connections"
+            echo "### Finish in Power Automate before the flow will run"
             echo
-            echo "Both connectors use delegated-user OAuth, so a person signs in once per"
-            echo "environment. The pipeline never binds them, so this survives every later deploy."
+            echo "The import replaces the flow, so its connections come back unbound and the flow"
+            echo "comes back switched off. That is true of the first deployment and of every"
+            echo "redeployment, so expect to do this again after any run that changes the solution."
+            echo "The connections themselves are not deleted and are reselected, not recreated."
             echo
-            echo "The values you need are already in the solution, under **Environment variables**:"
+            echo "The values you need are in the solution, under **Environment variables**:"
             echo
             echo "| Environment variable | Use it for |"
             echo "| --- | --- |"
             echo "| \`srcls_FunctionBaseUrl\` | *Base Resource URL* |"
             echo "| \`srcls_FunctionApplicationIdUri\` | *Microsoft Entra ID Resource URI (Application ID URI)* |"
             echo
-            echo "1. Open the **Classify and Notify** flow in Power Automate."
-            echo "2. On **Invoke classification API**, add a connection:"
-            echo "   **HTTP with Microsoft Entra ID (preauthorized)** — not the v2 connector."
-            echo "3. On **Send confirmation email**, add an **Office 365 Outlook** connection."
-            echo "4. Save the flow and turn it on."
+            echo "1. Open the **Classify and Notify** flow in Power Automate and select **Edit**."
+            echo "2. On **Invoke classification API**, pick the"
+            echo "   **HTTP with Microsoft Entra ID (preauthorized)** connection — not the v2 connector."
+            echo "3. On **Send confirmation email**, pick the **Office 365 Outlook** connection."
+            echo "4. **Save**, then **turn the flow on**."
             echo
             echo "See [docs/deployment.md](../blob/main/docs/deployment.md#create-the-connections-and-turn-the-flow-on)."
           } >> "$GITHUB_STEP_SUMMARY"

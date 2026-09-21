@@ -185,10 +185,16 @@ pac admin assign-user `
 
 ### Create the connections and turn the flow on
 
-Both connections are created by a person, once per environment, directly in the flow. See
+Both connections are created by a person, once per environment. See
 [limitations.md](limitations.md#2-connections-are-created-and-bound-by-a-person-once-per-environment)
 for why this cannot be automated. Do it after the first deployment: the Function App base URL is a
 deployment output.
+
+> **This is not only a first-run step.** Every deployment that imports the solution replaces the
+> flow, and the replacement arrives with its connections unbound and the flow switched off. Plan
+> to spend a minute in Power Automate after any deployment that changes the Power Platform
+> solution. The connections themselves survive — you reselect them, you do not recreate them.
+> [What a redeployment resets](#what-a-redeployment-resets) covers this in full.
 
 #### Where to find the two values
 
@@ -221,17 +227,27 @@ Other places the same values exist, if you prefer:
 
 #### The steps
 
-1. Open the **Classify and Notify** flow in Power Automate.
+1. Open the **Classify and Notify** flow in Power Automate and select **Edit**.
 2. On the **Invoke classification API** action, create a new connection:
    * Connector: **HTTP with Microsoft Entra ID (preauthorized)** — not the v2 connector
    * *Microsoft Entra ID Resource URI (Application ID URI)*: the `srcls_FunctionApplicationIdUri` value, for example `api://44444444-4444-4444-4444-444444444444`
    * *Base Resource URL*: the `srcls_FunctionBaseUrl` value, for example `https://func-srclass-demo-ab12cd.azurewebsites.net`
    * Sign in
 3. On the **Send confirmation email** action, create an **Office 365 Outlook** connection.
-4. Save the flow and turn it on.
+4. **Save** the flow, then **turn it on**. Both are needed: saving does not enable a flow that
+   the import left switched off.
 
-The pipeline does not bind connection references and does not activate the flow, so every later
-deployment leaves this work intact.
+On a redeployment the connections already exist, so steps 2 and 3 are a pick from a list rather
+than a sign-in.
+
+> **Create the connections in the flow designer, not ahead of time in Connections.** Adding a
+> connection from the designer binds it to the connection reference the solution already ships.
+> Creating one first under **Data** → **Connections** and then selecting it can leave you with a
+> second, duplicate connection reference for the same connector, which is confusing to unpick
+> later.
+
+The first call after a fresh network link can still fail while Power Platform settles — see
+[What a redeployment resets](#what-a-redeployment-resets).
 
 ---
 
@@ -359,7 +375,38 @@ Microsoft's guidance when a DeployIfNotExists policy manages private DNS: *"You 
 
 Re-running the Deploy workflow is safe and idempotent. Bicep converges the infrastructure, the function package is replaced, and the solution import uses `force-overwrite`.
 
-Two operations that are *not* cheap to repeat:
+### What a redeployment resets
+
+Importing the solution replaces the flow. The replacement is the flow as it exists in source
+control, which has no connections selected and is not switched on, so **after any deployment that
+imports the solution you have to go back into Power Automate**, reselect both connections, save,
+and turn the flow on. A flow left in that state does not fail loudly — it simply never runs.
+
+What does *not* happen is equally worth knowing:
+
+| | Survives a redeployment? |
+| --- | --- |
+| The two connections themselves | **Yes.** They belong to the person who made them, and the pipeline has no permission to touch them. You reselect them, you do not recreate them |
+| The binding from the flow to those connections | No — reselect it |
+| The flow being switched on | No — turn it back on |
+| Environment variable values | Yes. They are set from deployment outputs on every import |
+| The Power Platform environment and its Dataverse database | Yes |
+| The enterprise policy link | Yes. The link job is a no-op when the environment is already linked |
+
+The pipeline deliberately does not bind the connection references, because doing so as the
+deployment service principal fails with `ConnectionAuthorizationFailed` and destroys a binding
+that was already working. That is covered in
+[limitations.md](limitations.md#why-the-pipeline-does-not-bind-them-either).
+
+### The first run after a network change can be slow, then fail once
+
+Enabling or changing subnet injection can leave Power Platform unsettled for up to 30 minutes.
+During that window the flow may sit in the connector for a long time and then return a `404` from
+`*.azure-apihub.net` — which looks like a broken function but is the connector failing to route.
+Wait, then run it again before investigating anything else. The same symptom with its other causes
+is in [troubleshooting.md](troubleshooting.md).
+
+### Two operations that are not cheap to repeat
 
 * **Enabling or disabling subnet injection** can cause up to 30 minutes of instability. The link job is a no-op when the environment is already linked.
 * **Changing a delegated subnet's range** requires unlinking first, and Microsoft support while it remains delegated.

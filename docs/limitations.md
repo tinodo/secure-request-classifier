@@ -16,7 +16,7 @@ The flow's **PowerApps (V2) trigger** renders a typed input form when the flow i
 
 ### What cannot be automated
 
-Producing the binary `.msapp` for an optional canvas front end from the committed Power Fx YAML source, inside a GitHub Actions job, with no prior human interaction.
+Producing the binary `.msapp` for a canvas front end from Power Fx YAML source, inside a GitHub Actions job, with no prior human interaction.
 
 ### Why
 
@@ -41,17 +41,18 @@ Microsoft's own supported source-control path for canvas apps is [Power Platform
 
 ### What this repository does instead
 
-* The app's Power Fx source is committed at `powerplatform/canvas-app/src/RequestScreen.pa.yaml`. It is fully readable, reviewable and diffable — the requirement that the app be source controlled is met.
-* `scripts/Build-Solution.ps1` attempts `pac canvas pack` on every build. If it succeeds (because a validated `.msapp` or validated sources are present), the app is included.
-* If it fails, the script prints the exact one-time action and **packs the solution without the canvas app**. The cloud flow, connection references and environment variables all still deploy.
-* The cloud flow uses a **PowerApps (V2) trigger**, which renders a typed input form when the flow is run directly from Power Automate. The presenter therefore has a working input form and the complete private-network path from the first deployment, with or without the canvas app.
+* The cloud flow uses a **PowerApps (V2) trigger**, which renders a typed input form when the flow is run directly from Power Automate. The presenter therefore has a working input form and the complete private-network path from the first deployment.
+* `scripts/Build-Solution.ps1` packs the solution as it is committed. It no longer attempts `pac canvas pack`, because that attempt could not succeed from a clean clone and its failure path was the only path anyone ever took.
+* The Power Fx source that used to be committed under `powerplatform/canvas-app/` has been removed. It described an app that was never built, never deployed and never demonstrated, so keeping it only suggested a front end existed.
 
 ### Smallest manual action
 
-Once, per repository — not per deployment:
+None is needed. The demonstration is complete without an app.
+
+If you want one anyway, it is once per repository rather than per deployment:
 
 1. Deploy the solution (the flow imports).
-2. In [make.powerapps.com](https://make.powerapps.com), create a blank canvas app inside the `SecureRequestClassifier` solution and build the form described in `RequestScreen.pa.yaml` (six inputs, a submit button, a result card). Add the `ClassifyandNotify` flow to it.
+2. In [make.powerapps.com](https://make.powerapps.com), create a blank canvas app inside the `SecureRequestClassifier` solution: six inputs (requester name, requester email, title, category, impact, description), a submit button and a result card. Add the `ClassifyandNotify` flow to it and call it from the button.
 3. Save and publish.
 4. Export the unmanaged solution and unpack it over the repository source:
 
@@ -60,7 +61,7 @@ Once, per repository — not per deployment:
    pac solution unpack --zipfile ./export.zip --folder ./powerplatform/solution/src --packagetype Unmanaged
    ```
 
-5. Commit the resulting `CanvasApps/*.msapp` and `CanvasApps/*.meta.xml`. Every subsequent deployment includes the app automatically.
+5. Commit the resulting `CanvasApps/*.msapp` and `CanvasApps/*.meta.xml`. Every subsequent deployment then includes the app, because `pac solution pack` packs whatever is in the source tree.
 
 Microsoft's own CoE Starter Kit commits the `.msapp` binary to source control for exactly this reason.
 
@@ -136,21 +137,31 @@ into the solution's own environment variables, in the environment you are alread
 
 **The steps.**
 
-1. Open the **Classify and Notify** flow in Power Automate.
+1. Open the **Classify and Notify** flow in Power Automate and select **Edit**.
 2. On the **Invoke classification API** action, create a new connection:
    * Connector: **HTTP with Microsoft Entra ID (preauthorized)** — not the v2 connector
    * *Microsoft Entra ID Resource URI (Application ID URI)*: the `srcls_FunctionApplicationIdUri` value
    * *Base Resource URL*: the `srcls_FunctionBaseUrl` value
    * Sign in
 3. On the **Send confirmation email** action, create an **Office 365 Outlook** connection.
-4. Save the flow and turn it on.
+4. **Save** the flow, then **turn it on**. Saving alone does not enable a flow the import left off.
 
 `scripts/Initialize-EntraResources.ps1` has already created the `oauth2PermissionGrant` that lets
 step 2 complete without a consent prompt.
 
-Every later deployment updates the flow, the environment variables and the infrastructure, and
-leaves those connections bound. Full walkthrough, including other places the same values can be
-read from, in [deployment.md](deployment.md#create-the-connections-and-turn-the-flow-on).
+Create both connections from inside the flow designer. Creating one first under **Data** →
+**Connections** and then selecting it in the flow can leave a second connection reference for the
+same connector, duplicating what the solution already ships.
+
+**It is once per environment, but not once per lifetime.** The connections are made once. The
+*binding* is not: every import replaces the flow, so the replacement arrives with nothing selected
+and switched off, and steps 1 to 4 have to be repeated — as a pick from a list rather than a
+sign-in, since the connections are still there. Anything that claims a redeployment leaves the
+flow runnable is wrong; see
+[deployment.md](deployment.md#what-a-redeployment-resets) for what survives and what does not.
+
+Full walkthrough, including other places the same values can be read from, in
+[deployment.md](deployment.md#create-the-connections-and-turn-the-flow-on).
 
 > Changing preauthorizations can take up to an hour to affect connections that already existed. New connections pick the change up immediately. — connector reference, Known Issues
 

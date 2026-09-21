@@ -34,9 +34,8 @@ The application logic is deliberately small. The interesting part is the network
 > **There is no canvas app in this repository's deployment.** `pac canvas pack` is deprecated and
 > refuses to build an `.msapp` from YAML that has not been opened in Power Apps Studio, so no app
 > binary can be produced in CI. The flow's PowerApps (V2) trigger renders the same typed input
-> form and exercises the identical network path, which is what the demonstration is about. Power
-> Fx source for an optional canvas front end is committed under `powerplatform/canvas-app/src/`;
-> see [docs/limitations.md](docs/limitations.md#1-there-is-no-canvas-app-and-one-cannot-be-built-in-ci).
+> form and exercises the identical network path, which is what the demonstration is about. See
+> [docs/limitations.md](docs/limitations.md#1-there-is-no-canvas-app-and-one-cannot-be-built-in-ci).
 
 ---
 
@@ -75,19 +74,18 @@ flowchart TB
 
     MAIL["Requester mailbox<br/>Microsoft 365"]
 
-    U -->|"1. submit form"| APP
-    APP -->|"2. Run()"| FLOW
+    U -->|"1. run the flow, fill in the trigger form"| FLOW
     FLOW --> CONN
-    CONN -->|"3. egress from the delegated subnet"| SNETPP1
-    SNETPP1 -->|"4. resolve via VNet DNS"| DNS
-    SNETPP1 -->|"5. private IP"| PE
+    CONN -->|"2. egress from the delegated subnet"| SNETPP1
+    SNETPP1 -->|"3. resolve via VNet DNS"| DNS
+    SNETPP1 -->|"4. private IP"| PE
     PE --> FUNC
     FUNC -->|"outbound VNet integration"| SNETFN
     SNETFN --> ST
     FUNC --> AI
-    FUNC -->|"6. JSON response"| FLOW
-    FLOW --> O365 -->|"7. email"| MAIL
-    FLOW -->|"8. result"| APP --> U
+    FUNC -->|"5. JSON response"| FLOW
+    FLOW --> O365 -->|"6. email"| MAIL
+    FLOW -->|"7. result"| U
 
     EP -.->|"binds"| SNETPP1
     EP -.->|"binds"| SNETPP2
@@ -206,7 +204,6 @@ sequenceDiagram
 │   ├── solution/src/             Unpacked, source-controlled solution
 │   │   ├── Other/                Solution.xml, Customizations.xml, Relationships.xml
 │   │   └── Workflows/            The cloud flow definition (Logic App JSON + metadata)
-│   ├── canvas-app/src/           Power Fx YAML source for the canvas app
 │   └── config/
 │       └── deploymentSettings.template.json
 ├── scripts/
@@ -216,6 +213,7 @@ sequenceDiagram
 │   ├── Build-Solution.ps1                  Packs the Power Platform solution
 │   ├── Test-SolutionPackage.ps1            Rejects a package Dataverse cannot import
 │   ├── Test-FunctionHostStartup.ps1        Starts the Functions host and checks every function indexes
+│   ├── Test-DocumentationLinks.ps1         Checks every internal documentation link and anchor resolves
 │   ├── New-DeploymentSettings.ps1          Renders the deployment settings file
 │   ├── Get-SolutionImportFailure.ps1       Reads the real import error out of Dataverse
 │   ├── Set-FunctionAppDeploymentWindow.ps1 Opens/closes the transient deployment window
@@ -303,7 +301,6 @@ Settings → Secrets and variables → Actions → *Secrets*:
 | `POWER_PLATFORM_APP_ID` | for solution import | same as `AZURE_CLIENT_ID` |
 | `POWER_PLATFORM_TENANT_ID` | for solution import | same as `AZURE_TENANT_ID` |
 | `POWER_PLATFORM_ADMIN_OBJECT_ID` | recommended | object id that will link the policy |
-| `POWER_PLATFORM_CONNECTION_ID_*` | optional | see [docs/limitations.md](docs/limitations.md) |
 
 Settings → Secrets and variables → Actions → *Variables* (non-sensitive configuration):
 
@@ -321,24 +318,40 @@ so passing them that way would silently yield an empty string.
 
 The full table, including the Azure Landing Zone switches, is in [docs/deployment.md](docs/deployment.md#configuration-reference).
 
-### 3. Complete the Power Platform prerequisites (once)
+### 3. Complete the Power Platform prerequisites
 
-```powershell
-# Enable Managed Environments (required by VNet support)
-pac admin set-governance-config --environment <environment-id> --protection-level Standard
+For a **new** environment there is nothing to do here. The `Provision Power Platform environment`
+job creates it, enables Managed Environments and adds the deployment identity as a Dataverse
+application user.
 
-# Let the deployment identity import solutions
-pac admin assign-user --environment <environment-id> `
-    --user <AZURE_CLIENT_ID> --role "System administrator" --application-user
-```
+Two things must be true at the tenant level, once, and neither can be done by this repository:
 
-Then grant the deployment app registration the **Power Platform Administrator** role in Microsoft Entra ID so it can link the enterprise policy.
+* An Azure subscription is associated with the Power Platform tenant — see [docs/limitations.md](docs/limitations.md#5-the-azure-subscription-association-is-a-tenant-prerequisite).
+* The deployment app registration holds **Power Platform Administrator** in Microsoft Entra ID, so it can link the enterprise policy.
+
+If you are pointing the demo at an environment that already exists and was created some other way,
+apply the two commands in [docs/deployment.md](docs/deployment.md#5-power-platform-prerequisites-once).
 
 ### 4. Run the workflow
 
 Actions → **Deploy** → *Run workflow*.
 
 One run performs validation, Azure infrastructure, Function build and deployment, enterprise-policy linking, Power Platform solution import, and post-deployment verification.
+
+### 5. Finish in Power Automate
+
+The deployment cannot create the two connections — both connectors sign in as a person, so
+automating them would mean storing a credential. **The flow does not run until you do this**, and
+you do it again after any deployment that re-imports the solution:
+
+1. Open the **Classify and Notify** flow in [Power Automate](https://make.powerautomate.com) and select **Edit**.
+2. On **Invoke classification API**, add a connection — **HTTP with Microsoft Entra ID (preauthorized)**, not the v2 connector. It asks for two values, both of which are in the solution's **Environment variables**: `srcls_FunctionApplicationIdUri` and `srcls_FunctionBaseUrl`.
+3. On **Send confirmation email**, add an **Office 365 Outlook** connection.
+4. **Save**, then **turn the flow on**.
+
+The first run after a fresh network link can take a while and may fail once while Power Platform
+settles; run it again before investigating. Full detail, and what a redeployment does and does not
+reset, is in [docs/deployment.md](docs/deployment.md#create-the-connections-and-turn-the-flow-on).
 
 ---
 
@@ -399,6 +412,9 @@ A CI job (`security-invariants`) fails the build if any of these regress. See [d
 
 ## How to run the demo
 
+The flow must be switched on and both connections selected — see step 5 above. A freshly deployed
+flow is off.
+
 1. In [Power Automate](https://make.powerautomate.com), open the **Classify and Notify** flow.
 2. Select **Test** → **Manually** → **Test**. The PowerApps (V2) trigger renders a typed input form.
 3. Enter a requester name and email, a title, pick a category and impact, add a description.
@@ -413,13 +429,21 @@ The presenter's script, with talking points for each stage, is in **[docs/demo-s
 ## Validating private connectivity
 
 ```powershell
-# 30+ assertions: public access disabled, private endpoint approved, DNS records present,
-# RBAC correct, delegations correct, no shared keys, and more.
-pwsh ./scripts/Test-Deployment.ps1 -ResourceGroupName rg-srclass-demo
+# 40+ assertions: public access disabled, private endpoint approved, DNS records present,
+# RBAC correct and correctly scoped, delegations correct, no shared keys, and more.
+pwsh ./scripts/Test-Deployment.ps1 `
+    -ResourceGroupName rg-srclass-demo `
+    -SubscriptionId    <subscription-guid>
 
 # Two live probes: from the public internet (must fail) and from inside the VNet (must succeed).
 pwsh ./scripts/Invoke-PrivateConnectivityProbe.ps1 -ResourceGroupName rg-srclass-demo
 ```
+
+`-SubscriptionId` is optional but worth passing: without it the Azure CLI's current subscription is
+used, which is the usual reason for an otherwise inexplicable "resource group could not be found".
+
+Reading role assignments needs `Microsoft.Authorization/roleAssignments/read`. Without it those
+checks report a warning that says so, rather than claiming the grants are missing.
 
 Manual checks, including `nslookup` from the delegated subnet using Microsoft's own diagnostics cmdlets, are in [docs/verification.md](docs/verification.md).
 
@@ -490,8 +514,8 @@ Two guards stop it being aimed at the wrong thing: the resource group must be ta
 
 Fully documented, with citations, in **[docs/limitations.md](docs/limitations.md)**. Summary:
 
-1. **There is no canvas app, and one cannot be built in CI.** `pac canvas pack` is deprecated and refuses to pack YAML that has not been opened once in Power Apps Studio, so no `.msapp` can be produced by the pipeline. The flow's PowerApps (V2) trigger renders the same typed input form and exercises the identical network path, so the demonstration is complete without it. Power Fx source for an optional front end is committed.
-2. **The two connections are created and bound by a person, once per environment.** Both connectors use delegated-user OAuth, so there is no service-principal path that does not introduce a stored secret. The pipeline deliberately never binds connection references: it runs as a service principal that has no permission on a user's connection, and attempting it destroys the binding.
+1. **There is no canvas app, and one cannot be built in CI.** `pac canvas pack` is deprecated and refuses to pack YAML that has not been opened once in Power Apps Studio, so no `.msapp` can be produced by the pipeline. The flow's PowerApps (V2) trigger renders the same typed input form and exercises the identical network path, so the demonstration is complete without it.
+2. **The two connections are created and bound by a person, and rebound after every solution import.** Both connectors use delegated-user OAuth, so there is no service-principal path that does not introduce a stored secret. The pipeline deliberately never binds connection references: it runs as a service principal that has no permission on a user's connection, and attempting it destroys the binding. The connections themselves persist; the *binding* and the flow's on/off state do not survive an import.
 3. **Linking the enterprise policy to an environment is not an ARM operation.** It is automated here using Microsoft's `Enable-SubnetInjection` cmdlet, with a documented REST fallback.
 4. **Deploying code to a function app with public access disabled needs a network-connected runner.** Microsoft documents this explicitly. The default mode opens a transient, single-IP-restricted deployment window and re-seals it; `private-runner` mode avoids it entirely.
 5. **An associated Azure subscription is a tenant prerequisite** that must exist before this repository can deploy anything. Managed Environments is handled automatically by the environment provisioning script.
