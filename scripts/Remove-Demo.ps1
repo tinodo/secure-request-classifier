@@ -67,9 +67,37 @@
     estate. Use it only when you know the group was created by this demo and the tag was lost,
     and read the name back to yourself before pressing enter.
 
+.PARAMETER SubscriptionId
+    Subscription holding the resource group. Optional, but worth supplying: without it the Azure
+    CLI's current subscription is used, and a destructive script should not depend on ambient
+    machine state.
+
+.PARAMETER SolutionUniqueName
+    Unique name of the solution to delete from the environment. Defaults to the one this
+    repository ships.
+
+.PARAMETER DeploymentAppDisplayName
+    Display name of the deployment app registration, used only with -RemoveEntraApplications.
+
+.PARAMETER ApiAppDisplayName
+    Display name of the API app registration, used only with -RemoveEntraApplications.
 .EXAMPLE
     ./Remove-Demo.ps1 -ResourceGroupName rg-srclass-demo -PowerPlatformEnvironmentId 1111... -WhatIf
 
+.PARAMETER SubscriptionId
+    Subscription holding the resource group. Optional, but worth supplying: without it the Azure
+    CLI's current subscription is used, and a destructive script should not depend on ambient
+    machine state.
+
+.PARAMETER SolutionUniqueName
+    Unique name of the solution to delete from the environment. Defaults to the one this
+    repository ships.
+
+.PARAMETER DeploymentAppDisplayName
+    Display name of the deployment app registration, used only with -RemoveEntraApplications.
+
+.PARAMETER ApiAppDisplayName
+    Display name of the API app registration, used only with -RemoveEntraApplications.
 .EXAMPLE
     ./Remove-Demo.ps1 -ResourceGroupName rg-srclass-demo -PowerPlatformEnvironmentName srclass-demo -Force
 #>
@@ -77,6 +105,8 @@
 param(
     [Parameter(Mandatory)]
     [string] $ResourceGroupName,
+
+    [string] $SubscriptionId,
 
     [string] $PowerPlatformEnvironmentId,
 
@@ -101,6 +131,11 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Carried on every az call below. `az account set` is deliberately never used: it mutates the
+# machine's CLI context, which other tools and other shells share, so running this script would
+# silently change what an unrelated command targets.
+$azContext = if ($SubscriptionId) { @('--subscription', $SubscriptionId) } else { @() }
 
 # -Force means "do not ask me", not "ignore -WhatIf". Writing the gates as
 # `$Force -or $PSCmdlet.ShouldProcess(...)` short-circuits, so ShouldProcess is never reached and
@@ -132,7 +167,7 @@ Write-Step "Inspecting resource group '$ResourceGroupName'"
 $resourceGroup = $null
 
 try {
-    $resourceGroupJson = az group show --name $ResourceGroupName --output json 2>$null
+    $resourceGroupJson = az group show --name $ResourceGroupName --output json @azContext 2>$null
 
     if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($resourceGroupJson)) {
         $resourceGroup = $resourceGroupJson | ConvertFrom-Json
@@ -162,13 +197,13 @@ Refusing to delete '$ResourceGroupName'.
 It does not carry the tag workload=secure-request-classifier, so this script cannot confirm it
 belongs to the demo. Inspect it first:
 
-    az group show --name $ResourceGroupName --query tags
+    az group show --name $ResourceGroupName --query tags @azContext
 
 Re-run with -SkipTagCheck only if you are certain.
 "@
     }
 
-    $resources = az resource list --resource-group $ResourceGroupName --query "[].{name:name,type:type}" --output json | ConvertFrom-Json
+    $resources = az resource list --resource-group $ResourceGroupName --query "[].{name:name,type:type}" --output json @azContext | ConvertFrom-Json
     Write-Host "    $(@($resources).Count) resource(s) will be deleted:"
     foreach ($resource in @($resources)) {
         Write-Host ('      {0,-52} {1}' -f $resource.name, $resource.type)
@@ -198,7 +233,7 @@ if ($PowerPlatformEnvironmentId) {
     if ($resourceGroup) {
         $policyId = az resource list --resource-group $ResourceGroupName `
             --resource-type 'Microsoft.PowerPlatform/enterprisePolicies' `
-            --query '[0].id' --output tsv 2>$null
+            --query '[0].id' --output tsv @azContext 2>$null
     }
 
     if ($PSCmdlet.ShouldProcess($PowerPlatformEnvironmentId, 'Unlink network injection enterprise policy')) {
@@ -255,7 +290,7 @@ if ($resourceGroup) {
     if ($PSCmdlet.ShouldProcess($ResourceGroupName, 'Delete resource group and all resources in it')) {
         # Deliberately NOT --no-wait. This script reporting success has to mean the resource
         # group is actually gone, otherwise a redeploy races a half-deleted one.
-        az group delete --name $ResourceGroupName --yes --only-show-errors
+        az group delete --name $ResourceGroupName --yes --only-show-errors @azContext
 
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to delete resource group '$ResourceGroupName'."
@@ -274,7 +309,7 @@ if ($RemoveEntraApplications) {
     Write-Host '    before deploying again.' -ForegroundColor Yellow
 
     foreach ($displayName in @($DeploymentAppDisplayName, $ApiAppDisplayName)) {
-        $appId = az ad app list --display-name $displayName --query '[0].appId' --output tsv 2>$null
+        $appId = az ad app list --display-name $displayName --query '[0].appId' --output tsv @azContext 2>$null
 
         if (-not $appId) {
             Write-Host "    no app registration named '$displayName'"
@@ -282,7 +317,7 @@ if ($RemoveEntraApplications) {
         }
 
         if ($PSCmdlet.ShouldProcess($displayName, 'Delete app registration')) {
-            az ad app delete --id $appId --only-show-errors
+            az ad app delete --id $appId --only-show-errors @azContext
             Write-Host "    deleted '$displayName' ($appId)" -ForegroundColor Green
         }
     }
@@ -295,8 +330,25 @@ if ($RemoveEntraApplications) {
 
 Write-Step 'Cleanup complete'
 
-Write-Host 'Removed:' -ForegroundColor Green
-Write-Host "    resource group '$ResourceGroupName' and everything in it"
+# Report what actually happened, not what the arguments asked for. Claiming to have removed a
+# resource group that was never there, or announcing deletions during a -WhatIf preview, is the
+# kind of summary that teaches a reader to stop believing the summary.
+$previewOnly = $WhatIfPreference
+
+if ($previewOnly) {
+    Write-Host 'Nothing was changed (-WhatIf). This run would remove:' -ForegroundColor Cyan
+}
+else {
+    Write-Host 'Removed:' -ForegroundColor Green
+}
+
+if ($resourceGroup) {
+    Write-Host "    resource group '$ResourceGroupName' and everything in it"
+}
+else {
+    Write-Host "    nothing in Azure: resource group '$ResourceGroupName' did not exist"
+}
+
 if ($PowerPlatformEnvironmentId -and -not $KeepPowerPlatformEnvironment) {
     Write-Host '    the Power Platform environment, its Dataverse database and the solution'
 }

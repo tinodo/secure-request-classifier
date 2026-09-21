@@ -34,6 +34,9 @@
 .PARAMETER ForceRestApi
     Skip the PowerShell module and use the REST fallback.
 
+.PARAMETER TimeoutSeconds
+    How long to wait for the link or unlink operation to finish. Subnet injection can take tens of
+    minutes to settle, so raising this is usually better than re-running.
 .EXAMPLE
     ./Set-PowerPlatformSubnetInjection.ps1 `
         -EnvironmentId 11111111-1111-1111-1111-111111111111 `
