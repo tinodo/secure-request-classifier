@@ -382,6 +382,28 @@ function Invoke-Dataverse {
     return ($response.Content | ConvertFrom-Json)
 }
 
+function Get-FirstPropertyValue {
+    <#
+        Reads a named property off the first element of an OData `value` array, returning $null
+        when the array is empty or the property is absent.
+
+        Under Set-StrictMode, `@($response.value)[0].someId` on an empty result throws
+        PropertyNotFoundException rather than yielding $null, so the friendly `if (-not $x) { throw
+        "Could not find ..." }` guard on the next line never runs and the caller sees a property
+        error instead of the reason.
+    #>
+    param($Response, [Parameter(Mandatory)][string] $Name)
+
+    if ($null -eq $Response) { return $null }
+    if (-not $Response.PSObject.Properties['value']) { return $null }
+
+    $first = @($Response.value) | Select-Object -First 1
+    if ($null -eq $first) { return $null }
+    if (-not $first.PSObject.Properties[$Name]) { return $null }
+
+    return $first.PSObject.Properties[$Name].Value
+}
+
 function Set-DataverseApplicationUser {
     param(
         [Parameter(Mandatory)][string] $InstanceUrl,
@@ -394,14 +416,14 @@ function Set-DataverseApplicationUser {
     $systemUserId = $null
 
     if ($existing -and @($existing.value).Count -gt 0) {
-        $systemUserId = @($existing.value)[0].systemuserid
+        $systemUserId = Get-FirstPropertyValue -Response $existing -Name 'systemuserid'
         Write-Host "    application user already exists ($systemUserId)"
     }
     else {
         $businessUnits = Invoke-Dataverse -InstanceUrl $InstanceUrl -Method GET `
             -Path "businessunits?`$select=businessunitid&`$filter=parentbusinessunitid eq null"
 
-        $rootBusinessUnitId = @($businessUnits.value)[0].businessunitid
+        $rootBusinessUnitId = Get-FirstPropertyValue -Response $businessUnits -Name 'businessunitid'
 
         if (-not $rootBusinessUnitId) { throw 'Could not resolve the root business unit.' }
 
@@ -415,7 +437,7 @@ function Set-DataverseApplicationUser {
         if (-not $systemUserId) {
             $lookup = Invoke-Dataverse -InstanceUrl $InstanceUrl -Method GET `
                 -Path "systemusers?`$select=systemuserid&`$filter=applicationid eq $ApplicationId"
-            $systemUserId = @($lookup.value)[0].systemuserid
+            $systemUserId = Get-FirstPropertyValue -Response $lookup -Name 'systemuserid'
         }
 
         Write-Host "    created application user $systemUserId" -ForegroundColor Green
@@ -426,7 +448,7 @@ function Set-DataverseApplicationUser {
     $roles = Invoke-Dataverse -InstanceUrl $InstanceUrl -Method GET `
         -Path "roles?`$select=roleid,name&`$filter=name eq '$escapedRole'"
 
-    $roleId = @($roles.value)[0].roleid
+    $roleId = Get-FirstPropertyValue -Response $roles -Name 'roleid'
 
     if (-not $roleId) { throw "Could not find the '$($script:SystemAdministratorRoleName)' security role." }
 

@@ -834,6 +834,83 @@ Assert-True -Name 'Every script declares the PowerShell version it needs' `
     -Condition ($scriptsMissingVersionRequirement.Count -eq 0) `
     -Detail "Missing #Requires -Version 7.0: $($scriptsMissingVersionRequirement -join ', ')"
 
+# An undocumented switch is invisible to `Get-Help`, and -SkipTagCheck -- which disables the guard
+# that stops Remove-Demo being aimed at the wrong resource group -- was one of them. A safety
+# bypass nobody can find is not a safety feature.
+
+$undocumentedParameters = [System.Collections.Generic.List[string]]::new()
+
+foreach ($scriptFile in (Get-ChildItem -Path (Join-Path $RepositoryRoot 'scripts') -Filter '*.ps1' -File)) {
+    $text = Get-Content -Path $scriptFile.FullName -Raw
+
+    $help = ''
+    if ($text -match '(?ms)^<#(.*?)^#>') { $help = $Matches[1] }
+    if (-not $help) { continue }
+
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($scriptFile.FullName, [ref]$null, [ref]$null)
+    if (-not $ast.ParamBlock) { continue }
+
+    foreach ($parameter in $ast.ParamBlock.Parameters) {
+        $name = $parameter.Name.VariablePath.UserPath
+
+        # Only switches change behaviour by being present, which is what makes an undocumented one
+        # a trap. Typed parameters are self-describing enough at the call site.
+        $isSwitch = $parameter.StaticType.Name -eq 'SwitchParameter'
+        if (-not $isSwitch) { continue }
+
+        if ($help -notmatch "(?m)^\s*\.PARAMETER\s+$([regex]::Escape($name))\s*$") {
+            $undocumentedParameters.Add("$($scriptFile.Name) -$name")
+        }
+    }
+}
+
+Assert-True -Name 'Every switch parameter is documented' `
+    -Condition ($undocumentedParameters.Count -eq 0) `
+    -Detail "Undocumented: $($undocumentedParameters -join ', ')"
+
+# ---------------------------------------------------------------------------------------------
+# The flow must answer on every path
+# ---------------------------------------------------------------------------------------------
+
+# A PowerApps (V2) trigger is request/response: an action that fails with no Response behind it
+# leaves the caller with an opaque "flow failed" and nothing else. That was true of the notify
+# step, so a request that classified successfully but could not be emailed returned nothing at
+# all, despite the business outcome having been achieved.
+
+$flowActions = $flow.properties.definition.actions
+
+$responseActions = @($flowActions.PSObject.Properties |
+    Where-Object { $_.Value.PSObject.Properties['type'] -and $_.Value.type -eq 'Response' })
+
+Assert-True -Name 'The flow declares at least two Response actions' `
+    -Condition ($responseActions.Count -ge 2) `
+    -Detail 'One success path and at least one failure path are required, otherwise a failure returns nothing.'
+
+# Any action that another action does not already handle a failure of, and which is not itself a
+# Response, must be terminal-safe: something has to answer when it fails.
+$handledFailures = [System.Collections.Generic.HashSet[string]]::new()
+
+foreach ($action in $flowActions.PSObject.Properties) {
+    if (-not $action.Value.PSObject.Properties['runAfter']) { continue }
+
+    foreach ($predecessor in $action.Value.runAfter.PSObject.Properties) {
+        if (@($predecessor.Value) -contains 'Failed' -or @($predecessor.Value) -contains 'TimedOut') {
+            [void]$handledFailures.Add($predecessor.Name)
+        }
+    }
+}
+
+# The last action before a Response is the one whose failure is most likely to go unanswered.
+$notifyAction = 'Send_confirmation_email'
+
+Assert-True -Name "A failure of $notifyAction still returns a response" `
+    -Condition ($handledFailures.Contains($notifyAction)) `
+    -Detail 'Otherwise a successful classification that cannot be emailed returns nothing to the caller.'
+
+Assert-True -Name 'A failure of Invoke_classification_API still returns a response' `
+    -Condition ($handledFailures.Contains('Invoke_classification_API')) `
+    -Detail 'This is the private network call; its failure is the one a demo most needs to explain.'
+
 # ---------------------------------------------------------------------------------------------
 
 Write-Host ('-' * 70)

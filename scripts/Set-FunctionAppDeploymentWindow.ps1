@@ -16,9 +16,11 @@
     A standard GitHub-hosted runner has neither. This script implements the fallback used when
     FUNCTION_DEPLOY_MODE is 'deployment-window':
 
-      Open  - set publicNetworkAccess to Enabled, then immediately restrict both the app and
-              its SCM site to a single source IP address (the runner's egress address) with a
-              default action of Deny.
+      Open  - restrict both the app and its SCM site to a single source IP address (the runner's
+              egress address) with a default action of Deny, and only THEN set publicNetworkAccess
+              to Enabled. That order matters: an Allow rule restricts nothing while the default
+              action is still Azure's default of Allow, so enabling public access first would
+              leave the app open to the entire internet until the Deny landed.
       Close - remove the restrictions and set publicNetworkAccess back to Disabled.
 
     The runtime path is never affected: Power Automate always reaches the app through the
@@ -119,10 +121,14 @@ switch ($Action) {
 
         if (-not $PSCmdlet.ShouldProcess($target, 'Open deployment window')) { return }
 
-        Set-PublicNetworkAccess -Value 'Enabled'
-
-        # Add the allow rule before flipping the default action to Deny so the window is never
-        # briefly open to the whole internet.
+        # Order matters, and the obvious order is wrong. Enabling public access first and tightening
+        # afterwards leaves the app reachable from the entire internet for as long as the next two
+        # calls take: an Allow rule restricts nothing while ipSecurityRestrictionsDefaultAction is
+        # still Azure's default of Allow, which it is on a freshly created app.
+        #
+        # So build the restriction first, while publicNetworkAccess is still Disabled and none of it
+        # is reachable anyway, and open the door last. At no point is the app both public and
+        # unrestricted.
         foreach ($scm in @($false, $true)) {
             az webapp config access-restriction add `
                 --resource-group $ResourceGroupName `
@@ -144,6 +150,13 @@ switch ($Action) {
                   'properties.siteConfig.scmIpSecurityRestrictionsDefaultAction=Deny' `
                   'properties.siteConfig.scmIpSecurityRestrictionsUseMain=false' `
             --only-show-errors --output none
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to restrict $FunctionAppName to $AllowedIpAddress/32. Public access was NOT enabled."
+        }
+
+        # Only now is it safe to make the app reachable at all.
+        Set-PublicNetworkAccess -Value 'Enabled'
 
         Write-Host "Deployment window open. Everything except $AllowedIpAddress/32 is denied." -ForegroundColor Yellow
 
