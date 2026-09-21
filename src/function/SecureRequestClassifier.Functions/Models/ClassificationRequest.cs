@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace SecureRequestClassifier.Functions.Models;
 
 /// <summary>
-/// The payload submitted by the Power Automate cloud flow on behalf of the
-/// <c>Secure Request Classifier</c> canvas app.
+/// The payload submitted by the <c>Classify and Notify</c> Power Automate cloud flow. The flow's
+/// PowerApps (V2) trigger collects these fields; there is no canvas app.
 /// </summary>
 public sealed record ClassificationRequest
 {

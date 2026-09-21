@@ -14,6 +14,9 @@
     succeeds and a demo that silently fails. This script catches that class of drift, and runs
     in CI on every pull request.
 
+.PARAMETER RepositoryRoot
+    Root of the repository to check. Defaults to the parent of this script's directory, which is
+    correct for every normal invocation.
 .EXAMPLE
     pwsh ./scripts/Test-RepositoryConsistency.ps1
 #>
@@ -834,9 +837,9 @@ Assert-True -Name 'Every script declares the PowerShell version it needs' `
     -Condition ($scriptsMissingVersionRequirement.Count -eq 0) `
     -Detail "Missing #Requires -Version 7.0: $($scriptsMissingVersionRequirement -join ', ')"
 
-# An undocumented switch is invisible to `Get-Help`, and -SkipTagCheck -- which disables the guard
-# that stops Remove-Demo being aimed at the wrong resource group -- was one of them. A safety
-# bypass nobody can find is not a safety feature.
+# An undocumented parameter is invisible to `Get-Help`, and -SkipTagCheck -- which disables the
+# guard that stops Remove-Demo being aimed at the wrong resource group -- was one of them. A
+# safety bypass nobody can find is not a safety feature.
 
 $undocumentedParameters = [System.Collections.Generic.List[string]]::new()
 
@@ -853,20 +856,62 @@ foreach ($scriptFile in (Get-ChildItem -Path (Join-Path $RepositoryRoot 'scripts
     foreach ($parameter in $ast.ParamBlock.Parameters) {
         $name = $parameter.Name.VariablePath.UserPath
 
-        # Only switches change behaviour by being present, which is what makes an undocumented one
-        # a trap. Typed parameters are self-describing enough at the call site.
-        $isSwitch = $parameter.StaticType.Name -eq 'SwitchParameter'
-        if (-not $isSwitch) { continue }
-
         if ($help -notmatch "(?m)^\s*\.PARAMETER\s+$([regex]::Escape($name))\s*$") {
             $undocumentedParameters.Add("$($scriptFile.Name) -$name")
         }
     }
 }
 
-Assert-True -Name 'Every switch parameter is documented' `
+Assert-True -Name 'Every script parameter is documented' `
     -Condition ($undocumentedParameters.Count -eq 0) `
     -Detail "Undocumented: $($undocumentedParameters -join ', ')"
+
+# Anything that touches Azure and accepts -SubscriptionId must pass it on every call. `az account
+# set` is never used, because it mutates CLI state the whole machine shares.
+$ambientSubscriptionCalls = [System.Collections.Generic.List[string]]::new()
+
+foreach ($scriptName in @('Remove-Demo.ps1', 'Invoke-PrivateConnectivityProbe.ps1', 'Set-FunctionAppDeploymentWindow.ps1', 'Test-Deployment.ps1')) {
+    $scriptText = Get-FileText "scripts/$scriptName"
+    $lines = $scriptText -split "`r?`n"
+
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if ($lines[$index] -notmatch '^\s*(\$\w+\s*=\s*)?(&\s*)?az\s') { continue }
+
+        # `az account get-access-token` is exempt. It mints a tenant-scoped token for a named
+        # resource, not a subscription-scoped one, and pinning the Power Platform token to an Azure
+        # subscription made the environment lookup return 404 -- verified live, in both directions.
+        if ($lines[$index] -match 'az account get-access-token') { continue }
+
+        # Follow backtick continuations: the subscription may be on a later line of the same call.
+        $last = $index
+        while ($last -lt $lines.Count - 1 -and $lines[$last] -match '`\s*$') { $last++ }
+
+        $invocation = ($lines[$index..$last] -join ' ')
+        $satisfied = $invocation -match '--subscription'
+
+        # A splatted argument array is fine, provided the array it splats is itself built with a
+        # subscription. Accepting the splat on sight would let a future refactor smuggle one past.
+        if (-not $satisfied) {
+            foreach ($splat in [regex]::Matches($invocation, '@(\w+)')) {
+                $variableName = $splat.Groups[1].Value
+                if ($scriptText -match "(?ms)\`$$variableName\s*=.*?--subscription") {
+                    $satisfied = $true
+                    break
+                }
+            }
+        }
+
+        if (-not $satisfied) {
+            $ambientSubscriptionCalls.Add("$scriptName" + ':' + ($index + 1))
+        }
+
+        $index = $last
+    }
+}
+
+Assert-True -Name 'No script relies on the ambient Azure subscription' `
+    -Condition ($ambientSubscriptionCalls.Count -eq 0) `
+    -Detail "Calls without an explicit subscription: $($ambientSubscriptionCalls -join ', ')"
 
 # ---------------------------------------------------------------------------------------------
 # The flow must answer on every path

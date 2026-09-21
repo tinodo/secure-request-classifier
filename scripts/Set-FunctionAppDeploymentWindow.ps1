@@ -43,9 +43,23 @@
     Source IPv4 address permitted during the window. Defaults to this machine's public egress
     address as reported by Azure's own IP echo service.
 
+.PARAMETER SubscriptionId
+    Subscription holding the function app. Optional: without it the Azure CLI's current
+    subscription is used.
+
+.PARAMETER RuleName
+    Name of the temporary access restriction rule. The close action removes the rule by this name,
+    so open and close must agree on it.
 .EXAMPLE
     ./Set-FunctionAppDeploymentWindow.ps1 -Action Open -ResourceGroupName rg-srclass-demo -FunctionAppName func-srclass-demo-ab12cd
 
+.PARAMETER SubscriptionId
+    Subscription holding the function app. Optional: without it the Azure CLI's current
+    subscription is used.
+
+.PARAMETER RuleName
+    Name of the temporary access restriction rule. The close action removes the rule by this name,
+    so open and close must agree on it.
 .EXAMPLE
     ./Set-FunctionAppDeploymentWindow.ps1 -Action Close -ResourceGroupName rg-srclass-demo -FunctionAppName func-srclass-demo-ab12cd
 #>
@@ -63,11 +77,19 @@ param(
 
     [string] $AllowedIpAddress,
 
+    [string] $SubscriptionId,
+
+
     [string] $RuleName = 'github-actions-deployment-window'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Carried on every az call. `az account set` is deliberately never used: it mutates the machine's
+# CLI context, which other tools and other shells share, so opening a deployment window would
+# silently change what an unrelated command targets.
+$azContext = if ($SubscriptionId) { @('--subscription', $SubscriptionId) } else { @() }
 
 function Get-PublicEgressAddress {
     foreach ($uri in @('https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com')) {
@@ -91,7 +113,7 @@ function Set-PublicNetworkAccess {
         --name $FunctionAppName `
         --resource-type 'Microsoft.Web/sites' `
         --set "properties.publicNetworkAccess=$Value" `
-        --only-show-errors --output none
+        --only-show-errors --output none @azContext
 
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to set publicNetworkAccess to $Value on $FunctionAppName."
@@ -108,7 +130,7 @@ function Remove-RestrictionIfPresent {
         --name $FunctionAppName `
         --rule-name $RuleName `
         --scm-site $scmArgument `
-        --only-show-errors --output none 2>$null | Out-Null
+        --only-show-errors --output none @azContext 2>$null | Out-Null
 }
 
 $target = "$FunctionAppName ($ResourceGroupName)"
@@ -139,7 +161,7 @@ switch ($Action) {
                 --priority 100 `
                 --description 'Temporary GitHub Actions deployment window' `
                 --scm-site $scm.ToString().ToLowerInvariant() `
-                --only-show-errors --output none
+                --only-show-errors --output none @azContext
         }
 
         az resource update `
@@ -149,7 +171,7 @@ switch ($Action) {
             --set 'properties.siteConfig.ipSecurityRestrictionsDefaultAction=Deny' `
                   'properties.siteConfig.scmIpSecurityRestrictionsDefaultAction=Deny' `
                   'properties.siteConfig.scmIpSecurityRestrictionsUseMain=false' `
-            --only-show-errors --output none
+            --only-show-errors --output none @azContext
 
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to restrict $FunctionAppName to $AllowedIpAddress/32. Public access was NOT enabled."
@@ -179,7 +201,7 @@ switch ($Action) {
             --resource-group $ResourceGroupName `
             --name $FunctionAppName `
             --resource-type 'Microsoft.Web/sites' `
-            --query 'properties.publicNetworkAccess' --output tsv
+            --query 'properties.publicNetworkAccess' --output tsv @azContext
 
         if ($state -ne 'Disabled') {
             throw "Deployment window did not close: publicNetworkAccess is '$state', expected 'Disabled'."

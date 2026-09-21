@@ -59,7 +59,7 @@ function ConvertTo-GitHubAnchor {
     return $text
 }
 
-function Get-Anchors {
+function Get-HeadingAnchor {
     param([Parameter(Mandatory)][string] $Path)
 
     $anchors = [System.Collections.Generic.HashSet[string]]::new()
@@ -83,10 +83,12 @@ function Get-Anchors {
     return $anchors
 }
 
-$markdownFiles = Get-ChildItem -Path $RepositoryRoot -Filter '*.md' -Recurse -File |
+$markdownFiles = @(Get-ChildItem -Path $RepositoryRoot -Filter '*.md' -Recurse -File |
     Where-Object { $_.FullName -notmatch '[\\/](bin|obj|node_modules|\.git)[\\/]' } |
-    Sort-Object FullName
+    Sort-Object FullName)
 
+# @() matters: a pipeline that yields nothing produces $null, and under StrictMode $null.Count
+# throws, so the intended message below would be replaced by a property error.
 if ($markdownFiles.Count -eq 0) {
     throw "No markdown files found under $RepositoryRoot. Refusing to pass a check that examined nothing."
 }
@@ -94,7 +96,7 @@ if ($markdownFiles.Count -eq 0) {
 # Anchors are needed for any file that is linked to, so gather them once up front.
 $anchorCache = @{}
 foreach ($file in $markdownFiles) {
-    $anchorCache[$file.FullName] = Get-Anchors -Path $file.FullName
+    $anchorCache[$file.FullName] = Get-HeadingAnchor -Path $file.FullName
 }
 
 Write-Host ''
@@ -154,7 +156,7 @@ foreach ($file in $markdownFiles) {
 
         $fullTarget = (Resolve-Path -LiteralPath $targetFile).Path
         if (-not $anchorCache.ContainsKey($fullTarget)) {
-            $anchorCache[$fullTarget] = Get-Anchors -Path $fullTarget
+            $anchorCache[$fullTarget] = Get-HeadingAnchor -Path $fullTarget
         }
 
         if (-not $anchorCache[$fullTarget].Contains($anchor)) {
