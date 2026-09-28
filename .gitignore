@@ -42,3 +42,7 @@ infra/**/*.json
 # Local scratch
 scratch/
 *.log
+
+# Agent session notes. Working history for whoever picks the project up; the durable
+# grounding lives in AGENTS.md and RESUME.md, which are committed.
+.session/

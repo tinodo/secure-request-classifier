@@ -236,6 +236,8 @@ sequenceDiagram
 │   └── limitations.md            What cannot be automated, why, with citations
 ├── global.json
 ├── SecureRequestClassifier.slnx
+├── AGENTS.md                    Rules, traps and validation steps for anyone changing this repo
+├── RESUME.md                    Current state, and what to do after a deployment
 ├── LICENSE                      MIT
 ├── SECURITY.md                  How to report a vulnerability, and the CI-enforced invariants
 ├── SUPPORT.md                   Where to get help, and what is out of scope
@@ -243,6 +245,10 @@ sequenceDiagram
 ├── CODE_OF_CONDUCT.md           Microsoft Open Source Code of Conduct
 └── README.md
 ```
+
+> **Changing anything here?** Read [AGENTS.md](AGENTS.md) first. It records the rules this
+> repository enforces, the traps that have already cost a day each, and the checks to run before
+> proposing a change. [RESUME.md](RESUME.md) records where the project currently stands.
 
 ---
 
